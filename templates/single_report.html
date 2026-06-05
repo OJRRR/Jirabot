@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>{{PROJECT}} 项目报告</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1400px; margin: 0 auto; background: white; padding: 24px; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { color: #333; margin-bottom: 8px; }
+        .meta { color: #666; font-size: 14px; margin-bottom: 24px; }
+        .stats { display: flex; gap: 20px; margin: 20px 0; flex-wrap: wrap; }
+        .stat { background: #e3f2fd; padding: 20px; border-radius: 12px; flex: 1; text-align: center; min-width: 120px; }
+        .stat-number { font-size: 32px; font-weight: bold; color: #1976d2; }
+        .risk { background: #fff3cd; padding: 16px; border-radius: 12px; margin: 20px 0; }
+        .risk-list { margin: 10px 0 0 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background: #667eea; color: white; }
+        tr:hover { background: #f5f5f5; }
+        .footer { text-align: center; margin-top: 24px; color: #999; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 {{PROJECT}} 项目报告</h1>
+        <div class="meta">生成时间：{{DATE}}</div>
+        
+        <div class="stats">
+            <div class="stat"><div class="stat-number">{{TOTAL}}</div><div>总任务数</div></div>
+            <div class="stat"><div class="stat-number" style="color:#28a745;">{{DONE}}</div><div>已完成</div></div>
+            <div class="stat"><div class="stat-number" style="color:#ffc107;">{{IN_PROGRESS}}</div><div>进行中</div></div>
+            <div class="stat"><div class="stat-number">{{PROGRESS}}%</div><div>进度</div></div>
+            <div class="stat"><div class="stat-number" style="color:#dc3545;">{{OVERDUE}}</div><div>超期</div></div>
+        </div>
+        
+        <div class="risk">
+            <strong>⚠️ 风险等级：{{RISK_LEVEL}}</strong>
+            <ul class="risk-list">
+                {{RISKS}}
+            </ul>
+        </div>
+        
+        <h2>📋 任务列表</h2>
+        <table>
+            <thead>
+                <tr><th>Key</th><th>标题</th><th>状态</th><th>优先级</th><th>负责人</th><th>目标结束</th></tr>
+            </thead>
+            <tbody>
+                {{TASK_ROWS}}
+            </tbody>
+        </table>
+        
+        <div class="footer">
+            <p>本报告由 Jira AI Agent 自动生成 | 进度基于工期权重计算</p>
+        </div>
+    </div>
+</body>
+</html>

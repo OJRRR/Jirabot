@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Jira 项目集风险报告</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header {
+            background: white;
+            border-radius: 16px;
+            padding: 24px 32px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .header h1 { color: #333; font-size: 28px; margin-bottom: 8px; }
+        .header .meta { color: #666; font-size: 14px; }
+        .table-container {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            overflow-x: auto;
+        }
+        table { width: 100%; border-collapse: collapse; }
+        th {
+            background: #667eea;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+        td { padding: 12px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
+        .progress-bar {
+            background: #e0e0e0;
+            border-radius: 10px;
+            height: 8px;
+            width: 100px;
+            overflow: hidden;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .progress-fill {
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            height: 100%;
+            border-radius: 10px;
+        }
+        .risk-high { color: #dc3545; font-weight: bold; }
+        .risk-medium { color: #fd7e14; font-weight: bold; }
+        .risk-low { color: #28a745; font-weight: bold; }
+        .risk-list { 
+            list-style: none; 
+            margin: 0; 
+            padding: 0;
+            font-size: 13px;
+            color: #666;
+        }
+        .risk-list li {
+            margin-bottom: 4px;
+            padding-left: 16px;
+            position: relative;
+        }
+        .risk-list li::before {
+            content: "⚠️";
+            position: absolute;
+            left: 0;
+        }
+        .overdue { color: #dc3545; }
+        .footer {
+            text-align: center;
+            margin-top: 24px;
+            color: rgba(255,255,255,0.8);
+            font-size: 12px;
+        }
+        .legend {
+            background: white;
+            border-radius: 16px;
+            padding: 16px 24px;
+            margin-top: 24px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Jira 项目集风险报告</h1>
+            <div class="meta">生成时间：2026-05-20 11:47:02</div>
+        </div>
+        
+        <div class="table-container">
+            <h3 style="margin-bottom: 16px;">📋 各项目风险状态</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>项目</th>
+                        <th>任务数</th>
+                        <th>已完成</th>
+                        <th>进行中</th>
+                        <th>进度</th>
+                        <th>超期</th>
+                        <th>风险等级</th>
+                        <th>风险分析</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                    <tr>
+                        <td><strong>FCCLMIG</strong></td>
+                        <td>23</td>
+                        <td>8</td>
+                        <td>6</td>
+                        <td>
+                            <div class="progress-bar"><div class="progress-fill" style="width: 69%"></div></div>
+                            69%
+                        </td>
+                        <td class="overdue">3</td>
+                        <td class="risk-medium">🟡 中风险</td>
+                        <td><ul class="risk-list"><li>进度偏慢（完成69%）</li><li>存在超期任务（3个）</li><li>高优先级任务较多（10个）</li></ul></td>
+                    </tr>
+                
+                    <tr>
+                        <td><strong>KO</strong></td>
+                        <td>50</td>
+                        <td>18</td>
+                        <td>19</td>
+                        <td>
+                            <div class="progress-bar"><div class="progress-fill" style="width: 70%"></div></div>
+                            70%
+                        </td>
+                        <td class="overdue">0</td>
+                        <td class="risk-low">🟢 低风险</td>
+                        <td><ul class="risk-list"><li>高优先级任务积压严重（27个）</li></ul></td>
+                    </tr>
+                
+                    <tr>
+                        <td><strong>FU2526</strong></td>
+                        <td>49</td>
+                        <td>13</td>
+                        <td>34</td>
+                        <td>
+                            <div class="progress-bar"><div class="progress-fill" style="width: 87%"></div></div>
+                            87%
+                        </td>
+                        <td class="overdue">11</td>
+                        <td class="risk-medium">🟡 中风险</td>
+                        <td><ul class="risk-list"><li>超期任务较多（11个）</li><li>高优先级任务积压严重（33个）</li></ul></td>
+                    </tr>
+                
+                    <tr>
+                        <td><strong>MCKINLEY</strong></td>
+                        <td>50</td>
+                        <td>23</td>
+                        <td>21</td>
+                        <td>
+                            <div class="progress-bar"><div class="progress-fill" style="width: 88%"></div></div>
+                            88%
+                        </td>
+                        <td class="overdue">1</td>
+                        <td class="risk-medium">🟡 中风险</td>
+                        <td><ul class="risk-list"><li>存在超期任务（1个）</li><li>高优先级任务积压严重（24个）</li></ul></td>
+                    </tr>
+                
+                    <tr>
+                        <td><strong>TISP</strong></td>
+                        <td>23</td>
+                        <td>7</td>
+                        <td>8</td>
+                        <td>
+                            <div class="progress-bar"><div class="progress-fill" style="width: 67%"></div></div>
+                            67%
+                        </td>
+                        <td class="overdue">4</td>
+                        <td class="risk-low">🟢 低风险</td>
+                        <td><ul class="risk-list"><li>进度偏慢（完成67%）</li><li>存在超期任务（4个）</li></ul></td>
+                    </tr>
+                
+                    <tr>
+                        <td><strong>S4MIG</strong></td>
+                        <td>50</td>
+                        <td>24</td>
+                        <td>9</td>
+                        <td>
+                            <div class="progress-bar"><div class="progress-fill" style="width: 42%"></div></div>
+                            42%
+                        </td>
+                        <td class="overdue">2</td>
+                        <td class="risk-medium">🟡 中风险</td>
+                        <td><ul class="risk-list"><li>进度滞后（仅完成42%）</li><li>存在超期任务（2个）</li><li>高优先级任务较多（9个）</li></ul></td>
+                    </tr>
+                
+                </tbody>
+            </table>
+        
+        <div class="table-container" style="margin-top: 24px;">
+            <h3 style="margin-bottom: 16px;">⚠️ 风险项明细 (Issue Type = Risk)</h3>
+            <p style="margin-bottom: 12px; color: #666; font-size: 13px;">共发现 <strong style="color:#dc3545;">38</strong> 个风险项</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>项目</th>
+                        <th>风险KEY</th>
+                        <th>摘要</th>
+                        <th>优先级</th>
+                        <th>状态</th>
+                        <th>负责人</th>
+                        <th>目标结束</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                        <tr>
+                            <td><strong>FCCLMIG</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FCCLMIG-25" target="_blank" style="color:#667eea;">FCCLMIG-25</a></td>
+                            <td>Project delay</td>
+                            <td class="risk-high">Highest</td>
+                            <td>⏳ Cancelled</td>
+                            <td>Wangwang WW27 Zhang</td>
+                            <td>-</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FCCLMIG</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FCCLMIG-24" target="_blank" style="color:#667eea;">FCCLMIG-24</a></td>
+                            <td>The impact of failing a BIA review</td>
+                            <td class="risk-high">Highest</td>
+                            <td>⏳ New</td>
+                            <td>Wangwang WW27 Zhang</td>
+                            <td>-</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>KO</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/KO-81" target="_blank" style="color:#667eea;">KO-81</a></td>
+                            <td>Server PSU fault</td>
+                            <td class="risk-low">Critical</td>
+                            <td>⏳ New</td>
+                            <td>Yatian YT2 Meng</td>
+                            <td>-</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>KO</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/KO-79" target="_blank" style="color:#667eea;">KO-79</a></td>
+                            <td>Plant microwave network power supply unstable risk</td>
+                            <td class="risk-low">Critical</td>
+                            <td>⏳ New</td>
+                            <td>Yatian YT2 Meng</td>
+                            <td>-</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>KO</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/KO-47" target="_blank" style="color:#667eea;">KO-47</a></td>
+                            <td>Batch1 Internet/MPLS Delivery</td>
+                            <td class="risk-low">Critical</td>
+                            <td>🔄 In Progress</td>
+                            <td>Yatian YT2 Meng</td>
+                            <td>-</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>KO</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/KO-70" target="_blank" style="color:#667eea;">KO-70</a></td>
+                            <td>GPS Platform Onsite Deployment</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Yatian YT2 Meng</td>
+                            <td>-</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>KO</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/KO-80" target="_blank" style="color:#667eea;">KO-80</a></td>
+                            <td>Batch 1 - Cloud Platform Delivery</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Yatian YT2 Meng</td>
+                            <td>-</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-52" target="_blank" style="color:#667eea;">FU2526-52</a></td>
+                            <td>Risk 总结</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Yahong YH2 Pan | 潘亚红</td>
+                            <td>-</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-25" target="_blank" style="color:#667eea;">FU2526-25</a></td>
+                            <td>Earth Platform OS升级 - 45%</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Dapeng DP3 Zhang</td>
+                            <td>2026-06-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-49" target="_blank" style="color:#667eea;">FU2526-49</a></td>
+                            <td>CREMET OS/DB升级</td>
+                            <td class="risk-high">Highest</td>
+                            <td>⏳ New</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-05-31</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-27" target="_blank" style="color:#667eea;">FU2526-27</a></td>
+                            <td>Kafka_Apache OS/DB升级</td>
+                            <td class="risk-high">Highest</td>
+                            <td>⏳ New</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-05-31</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-34" target="_blank" style="color:#667eea;">FU2526-34</a></td>
+                            <td>LOC OS/DB升级 - 剩7台</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-35" target="_blank" style="color:#667eea;">FU2526-35</a></td>
+                            <td>Magellan_Talend OS/DB升级 - 剩3台</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-05-31</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-36" target="_blank" style="color:#667eea;">FU2526-36</a></td>
+                            <td>LPC OS升级 - 剩6台</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-38" target="_blank" style="color:#667eea;">FU2526-38</a></td>
+                            <td>PPC OS升级 - 剩5台</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-39" target="_blank" style="color:#667eea;">FU2526-39</a></td>
+                            <td>UAPP OS升级 - 剩5台</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Yanhao YH3 Song</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-41" target="_blank" style="color:#667eea;">FU2526-41</a></td>
+                            <td>MI OS升级 - 剩4台</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-05-31</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-43" target="_blank" style="color:#667eea;">FU2526-43</a></td>
+                            <td>DPC OS升级 - 剩2台</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Yanxin YX70 Wang</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-51" target="_blank" style="color:#667eea;">FU2526-51</a></td>
+                            <td>SCI_Talend OS/DB升级 - 剩1台</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-46" target="_blank" style="color:#667eea;">FU2526-46</a></td>
+                            <td>LUDP-IOT OS升级</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-45" target="_blank" style="color:#667eea;">FU2526-45</a></td>
+                            <td>QlikSense-Global OS升级</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-33" target="_blank" style="color:#667eea;">FU2526-33</a></td>
+                            <td>SCC OS升级 - 剩1台</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-05-31</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-32" target="_blank" style="color:#667eea;">FU2526-32</a></td>
+                            <td>SCI OS/DB升级 - 94%</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-05-31</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-31" target="_blank" style="color:#667eea;">FU2526-31</a></td>
+                            <td>乐聊My_Hub OS升级 - 93%</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Dongfang DF2 Zhao</td>
+                            <td>2026-05-31</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-30" target="_blank" style="color:#667eea;">FU2526-30</a></td>
+                            <td>SSOC OS/DB升级 - 94%</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-29" target="_blank" style="color:#667eea;">FU2526-29</a></td>
+                            <td>DCSC OS/DB升级 - 96%</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Yanxin YX70 Wang</td>
+                            <td>2026-05-31</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-28" target="_blank" style="color:#667eea;">FU2526-28</a></td>
+                            <td>Lenovo_ID OS升级 - 50%</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-26" target="_blank" style="color:#667eea;">FU2526-26</a></td>
+                            <td>LUDP-Lakehouse OS升级 - 25%</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Jun Jun2 Dai | 戴军</td>
+                            <td>2026-06-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-48" target="_blank" style="color:#667eea;">FU2526-48</a></td>
+                            <td>PFPool OS升级</td>
+                            <td class="risk-high">Highest</td>
+                            <td>✅ Done</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-37" target="_blank" style="color:#667eea;">FU2526-37</a></td>
+                            <td>Retail Demo OS升级</td>
+                            <td class="risk-high">Highest</td>
+                            <td>✅ Done</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-44" target="_blank" style="color:#667eea;">FU2526-44</a></td>
+                            <td>DQM OS升级</td>
+                            <td class="risk-high">Highest</td>
+                            <td>✅ Done</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-50" target="_blank" style="color:#667eea;">FU2526-50</a></td>
+                            <td>ADS-Lenovo OS/DB升级</td>
+                            <td class="risk-high">Highest</td>
+                            <td>✅ Done</td>
+                            <td>Yanhao YH3 Song</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-40" target="_blank" style="color:#667eea;">FU2526-40</a></td>
+                            <td>MSP OS/DB升级</td>
+                            <td class="risk-high">Highest</td>
+                            <td>✅ Done</td>
+                            <td>Yanhao YH3 Song</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-47" target="_blank" style="color:#667eea;">FU2526-47</a></td>
+                            <td>JD-CC Voice Platform OS升级</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Irene XY90 Zhang | 张心怡</td>
+                            <td>2026-04-30</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>FU2526</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/FU2526-42" target="_blank" style="color:#667eea;">FU2526-42</a></td>
+                            <td>QlikReplicate OS升级</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Quan Peng</td>
+                            <td>2026-05-31</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>MCKINLEY</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/MCKINLEY-69" target="_blank" style="color:#667eea;">MCKINLEY-69</a></td>
+                            <td>Temp Power & HAVC directly impact NCSC Operation</td>
+                            <td class="risk-high">Highest</td>
+                            <td>🔄 In Progress</td>
+                            <td>Guangyao GY11 Zhang | 张光耀</td>
+                            <td>-</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>MCKINLEY</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/MCKINLEY-82" target="_blank" style="color:#667eea;">MCKINLEY-82</a></td>
+                            <td>Lack of material directly impact Requirement</td>
+                            <td class="risk-high">High</td>
+                            <td>🔄 In Progress</td>
+                            <td>Guangyao GY11 Zhang | 张光耀</td>
+                            <td>-</td>
+                        </tr>
+                    
+                        <tr>
+                            <td><strong>TISP</strong></td>
+                            <td><a href="https://jira.xpaas.lenovo.com/browse/TISP-14" target="_blank" style="color:#667eea;">TISP-14</a></td>
+                            <td>Server GR and Delivery</td>
+                            <td class="risk-medium">Medium</td>
+                            <td>✅ Done</td>
+                            <td>Zimeng ZM43 Wang | 王梓萌</td>
+                            <td>2026-05-25</td>
+                        </tr>
+                    
+                </tbody>
+            </table>
+        </div>
+        </div>
+        
+        <div class="legend">
+            <strong>📖 风险判定说明</strong><br>
+            • <strong>高风险</strong>：进度严重滞后 或 超期任务较多 或 高优先级积压严重<br>
+            • <strong>中风险</strong>：进度偏慢 或 存在超期 或 高优先级较多<br>
+            • <strong>低风险</strong>：整体正常，无明显风险项<br>
+            • <strong>进度计算</strong>：基于工期权重（target_end - target_start），进行中任务按已过天数估算进度<br>
+            • <strong>超期</strong>：target_end &lt; 今天 且未完成的任务
+        </div>
+        
+        <div class="footer">
+            <p>本报告由 Jira AI Agent 自动生成 | 进度基于工期权重计算 | 进行中任务按时间进度估算</p>
+        </div>
+    </div>
+</body>
+</html>
