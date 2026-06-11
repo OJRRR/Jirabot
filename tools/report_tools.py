@@ -1,12 +1,15 @@
 """报告生成工具 - 使用外部模板文件"""
 import os
+import logging
 from datetime import datetime
 from langchain.tools import tool
 from jira_client import JiraClient
 from config import Config
+from utils import fetch_all_issues
 from .risk_extractor import get_project_risks
 
-jira = JiraClient().get_client()
+_logger = logging.getLogger("jira_bot.report_tools")
+jira = JiraClient()
 
 
 def calculate_task_weight(fields):
@@ -14,9 +17,9 @@ def calculate_task_weight(fields):
         return 1
     target_start = fields.get(Config.TARGET_START_FIELD)
     target_end = fields.get(Config.TARGET_END_FIELD)
-    if target_start == 'None' or target_start == 'null':
+    if not target_start or target_start in ('None', 'null'):
         target_start = None
-    if target_end == 'None' or target_end == 'null':
+    if not target_end or target_end in ('None', 'null'):
         target_end = None
     if target_start and target_end:
         try:
@@ -39,9 +42,9 @@ def calculate_task_progress(fields):
     if status in ["In Progress", "进行中"]:
         target_start = fields.get(Config.TARGET_START_FIELD)
         target_end = fields.get(Config.TARGET_END_FIELD)
-        if target_start == 'None' or target_start == 'null':
+        if not target_start or target_start in ('None', 'null'):
             target_start = None
-        if target_end == 'None' or target_end == 'null':
+        if not target_end or target_end in ('None', 'null'):
             target_end = None
         if target_start and target_end:
             try:
@@ -122,21 +125,6 @@ def load_template(template_name):
         return f.read()
 
 
-def fetch_all_issues(jql_query, max_results=100):
-    all_issues = []
-    start_at = 0
-    while True:
-        result = jira.jql(jql_query, start=start_at, limit=max_results)
-        issues = result.get("issues", [])
-        if not issues:
-            break
-        all_issues.extend(issues)
-        start_at += max_results
-        if start_at >= result.get("total", 0):
-            break
-    return all_issues
-
-
 @tool
 def generate_portfolio_report() -> str:
     """
@@ -157,7 +145,7 @@ def generate_portfolio_report() -> str:
             try:
                 if not proj_key:
                     continue
-                issues_list = fetch_all_issues(f"project = {proj_key} ORDER BY updated DESC")
+                issues_list = fetch_all_issues(jira, f"project = {proj_key} ORDER BY updated DESC")
                 if not issues_list:
                     all_projects_data.append({"key": proj_key, "error": "无任务数据"})
                     continue
@@ -287,7 +275,7 @@ def generate_portfolio_report() -> str:
             html = html.replace("{{RISK_SECTION}}", risk_section)
         else:
             html = html + risk_section
-            print("⚠️ 警告: 模板文件中缺少 {{RISK_SECTION}} 占位符，风险模块已追加在报告末尾")
+            _logger.warning("模板文件中缺少 {{RISK_SECTION}} 占位符，风险模块已追加在报告末尾")
         filename = f"portfolio_risk_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
         filepath = os.path.join(Config.REPORTS_DIR, filename)
         with open(filepath, "w", encoding="utf-8") as f:
@@ -315,7 +303,7 @@ def generate_report(project_key: str = None) -> str:
             target_project = projects[0].get('key') if projects else None
         if not target_project:
             return "❌ 无法确定要查询的项目"
-        issues_list = fetch_all_issues(f"project = {target_project} ORDER BY updated DESC")
+        issues_list = fetch_all_issues(jira, f"project = {target_project} ORDER BY updated DESC")
         if not issues_list:
             return f"❌ 项目 {target_project} 没有任务数据"
         progress, _, _ = calculate_project_progress(issues_list)

@@ -1,5 +1,4 @@
-gitignore
 .env
 *.pyc
 __pycache__/
-report_*.html
+reports/*.html
