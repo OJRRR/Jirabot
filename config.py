@@ -15,19 +15,7 @@ class Config:
     JIRA_USER = os.getenv("JIRA_USER")
     JIRA_TOKEN = os.getenv("JIRA_TOKEN")
 
-    # ── 模型配置 ──────────────────────────────
-    MODEL_API_BASE = os.getenv("MODEL_API_BASE")
-    MODEL_API_KEY = os.getenv("MODEL_API_KEY")
-    MODEL_NAME = os.getenv("MODEL_NAME")
-    AI_TEMPERATURE = float(os.getenv("AI_TEMPERATURE", "0.5"))
-
-    # ── 项目配置 ──────────────────────────────
-    PROJECTS_CONFIG = os.getenv("PROJECTS", "").strip()
-    TARGET_PROJECTS = None
-    if PROJECTS_CONFIG and PROJECTS_CONFIG.upper() != "ALL":
-        TARGET_PROJECTS = [p.strip().upper() for p in PROJECTS_CONFIG.split(",") if p.strip()]
-
-    # ── 目录配置 ──────────────────────────────
+    # ── 目录配置（必须放在最前面）─────────────
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     REPORTS_DIR = os.getenv("REPORTS_DIR", os.path.join(BASE_DIR, "reports"))
     TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
@@ -37,6 +25,22 @@ class Config:
     os.makedirs(REPORTS_DIR, exist_ok=True)
     os.makedirs(TEMPLATE_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
+
+    # ── 模型配置 ──────────────────────────────
+    MODEL_API_BASE = os.getenv("MODEL_API_BASE")
+    MODEL_API_KEY = os.getenv("MODEL_API_KEY")
+    MODEL_NAME = os.getenv("MODEL_NAME")
+    AI_TEMPERATURE = float(os.getenv("AI_TEMPERATURE", "0.5"))
+
+    # ── 上传目录 ──────────────────────────────
+    UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    # ── 项目配置 ──────────────────────────────
+    PROJECTS_CONFIG = os.getenv("PROJECTS", "").strip()
+    TARGET_PROJECTS = None
+    if PROJECTS_CONFIG and PROJECTS_CONFIG.upper() != "ALL":
+        TARGET_PROJECTS = [p.strip().upper() for p in PROJECTS_CONFIG.split(",") if p.strip()]
 
     # ── 自定义字段ID ──────────────────────────
     TARGET_START_FIELD = os.getenv("TARGET_START_FIELD", "customfield_12914")

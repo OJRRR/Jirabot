@@ -1,4 +1,5 @@
-"""Jira AI Agent 主入口"""
+"""PM小帮手 主入口"""
+import os
 from config import Config
 from jira_client import JiraClient
 from tools import (
@@ -19,7 +20,9 @@ from tools import (
     batch_create_issues,
     search_issues,
     assign_issue,
-    delete_issue
+    delete_issue,
+    import_from_excel,
+    batch_update_dates,
 )
 
 from langchain_openai import ChatOpenAI
@@ -32,14 +35,16 @@ Config.print_info()
 # 初始化 Jira 客户端
 jira = JiraClient().get_client()
 
-# 创建 LLM
+# ── 创建 LLM（支持任何 OpenAI 兼容 API，含视觉模型）─
 llm = ChatOpenAI(
     model=Config.MODEL_NAME,
     api_key=Config.MODEL_API_KEY,
     base_url=Config.MODEL_API_BASE,
     temperature=Config.AI_TEMPERATURE,
-    max_tokens=4000
+    max_tokens=4096,
 )
+print(f"🤖 模型: {Config.MODEL_NAME}")
+print(f"🔗 API: {Config.MODEL_API_BASE}")
 
 # 工具列表
 tools = [
@@ -60,11 +65,20 @@ tools = [
     batch_create_issues,
     search_issues,
     assign_issue,
-    delete_issue
+    delete_issue,
+    import_from_excel,
+    batch_update_dates,
 ]
 
 # 系统提示词
 system_prompt = f"""你是一个专业的Jira助手。
+
+## 核心原则：用户信息不完整时禁止自行编造
+当用户要求你执行**写入操作**（创建/更新/删除/批量操作等）时，**你必须先逐一核验用户是否已提供所有必要信息**。
+- 如果缺少必填信息，必须**明确告诉用户缺少哪项信息**，让用户补充，**绝不能自行猜测、假设或编造**缺失的值。
+- 例如：用户说"创建个任务"，未提供项目KEY、标题、类型时，你必须列出缺少的字段让用户补充。
+- 例如：用户说"把 KO-29 的日期改一下"，但未提供具体日期，你必须问用户改成什么日期。
+- 查询/只读操作不受此限制。
 
 可用工具：
 - get_my_tasks: 获取我的任务
@@ -85,6 +99,8 @@ system_prompt = f"""你是一个专业的Jira助手。
 - search_issues: 搜索 Jira 任务，支持按项目、状态、负责人、优先级、问题类型、关键词筛选
 - assign_issue: 将任务分配给指定用户
 - delete_issue: 删除指定的 Jira Issue（需二次确认）
+- import_from_excel: 从 Excel 文件导入并批量创建 Jira 任务。用户上传 xlsx 文件后调用，自动解析列名并映射到 Jira 字段（summary, issue_type, start_date, end_date 等）。
+- batch_update_dates: 批量更新多个 Jira 任务的开始日期和结束日期，用于维护 Jira Plan 时间线。传入 JSON 数组，每项含 issue_key, start_date, end_date。
 
 **创建任务的标准流程（必须遵守）**：
 1. 用户必须提供项目KEY、问题类型（issue_type，如 Sub-task）、标题（summary）。
@@ -123,7 +139,7 @@ agent = create_react_agent(
 
 def main():
     print("\n" + "=" * 60)
-    print("🤖 Jira AI Agent 启动成功！")
+    print("🤖 PM小帮手 启动成功！")
     print("=" * 60)
     print("指令示例：")
     print("  📊 生成项目集报告")

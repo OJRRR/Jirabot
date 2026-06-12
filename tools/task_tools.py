@@ -1,6 +1,7 @@
 """任务查询与创建工具（重构版）"""
 import json
 import re
+import os
 import logging
 from langchain.tools import tool
 from jira_client import JiraClient
@@ -619,3 +620,224 @@ def delete_issue(issue_key: str = "", delete_subtasks: bool = True, confirmed: b
     except Exception as e:
         _logger.error("删除失败 %s: %s", issue_key, e)
         return f"删除失败: {str(e)}"
+
+
+@tool
+def import_from_excel(file_path: str = "", project_key: str = "",
+                      summary_col: str = "", issue_type_col: str = "",
+                      start_date_col: str = "", end_date_col: str = "",
+                      sheet_name: str = "Sheet1", header_row: int = 0) -> str:
+    """
+    从 Excel (.xlsx) 文件导入并批量创建 Jira 任务。
+    自动解析列内容，建议提供列名映射以准确识别。
+    
+    参数：
+      file_path - Excel 文件的完整路径（必填）
+      project_key - 目标项目 KEY（必填）
+      summary_col - 标题列的列名（可选，AI 会自动识别）
+      issue_type_col - 问题类型列的列名（可选）
+      start_date_col - 开始日期列的列名（可选）
+      end_date_col - 结束日期列的列名（可选）
+      sheet_name - 工作表名称，默认 Sheet1
+      header_row - 表头行号，默认 0（第一行）
+    """
+    import pandas as pd
+    from datetime import datetime, date
+
+    if not file_path or not project_key:
+        return "导入失败：必须提供 file_path 和 project_key。"
+    if not os.path.exists(file_path):
+        return f"导入失败：文件不存在 - {file_path}"
+
+    try:
+        df = pd.read_excel(file_path, sheet_name=sheet_name, header=header_row)
+        df = df.dropna(how="all").reset_index(drop=True)
+        if df.empty:
+            return "导入失败：Excel 文件为空。"
+
+        headers = list(df.columns)
+        _logger.info("Excel 列名: %s", headers)
+
+        # 智能列名映射
+        def find_col(candidates, col_hint=""):
+            if col_hint and col_hint in headers:
+                return col_hint
+            for h in headers:
+                h_lower = str(h).lower()
+                for c in candidates:
+                    if c in h_lower:
+                        return h
+            return None
+
+        summary_col_found = find_col(["summary", "task", "title", "标题", "任务", "任务名称", "task name", "name"], summary_col)
+        type_col_found = find_col(["issue type", "issuetype", "type", "问题类型", "类型", "issue_type"], issue_type_col)
+        start_col_found = find_col(["start date", "start_date", "start", "开始日期", "开始时间", "开始", "target start"], start_date_col)
+        end_col_found = find_col(["end date", "end_date", "end", "due date", "结束日期", "结束时间", "结束", "截止", "target end"], end_date_col)
+
+        if not summary_col_found:
+            # 用第一列兜底
+            summary_col_found = headers[0]
+            _logger.warning("未找到标题列，默认使用第一列: %s", summary_col_found)
+
+        results = []
+        success_count = 0
+        fail_count = 0
+        tasks_json = {"tasks": []}
+
+        for idx, row in df.iterrows():
+            summary = str(row.get(summary_col_found, "")).strip()
+            if pd.isna(summary) or not summary or summary == "nan":
+                continue
+
+            # 确定 issue_type
+            issue_type = "Task"
+            if type_col_found:
+                raw_type = row.get(type_col_found, "")
+                if pd.notna(raw_type):
+                    raw_type = str(raw_type).strip()
+                    if raw_type.lower() in ["sub-task", "subtask", "子任务", "子任务"]:
+                        issue_type = "Sub-task"
+                    elif raw_type.lower() in ["epic", "史诗"]:
+                        issue_type = "Epic"
+                    elif raw_type.lower() in ["risk", "风险"]:
+                        issue_type = "Risk"
+                    # 其他保持默认 Task
+
+            # 构建 additional_fields
+            additional = {}
+            if start_col_found:
+                val = row.get(start_col_found)
+                if pd.notna(val):
+                    if isinstance(val, (datetime, date)):
+                        additional[Config.TARGET_START_FIELD] = val.strftime("%Y-%m-%d")
+                    else:
+                        additional[Config.TARGET_START_FIELD] = str(val).strip()
+            if end_col_found:
+                val = row.get(end_col_found)
+                if pd.notna(val):
+                    if isinstance(val, (datetime, date)):
+                        additional[Config.TARGET_END_FIELD] = val.strftime("%Y-%m-%d")
+                    else:
+                        additional[Config.TARGET_END_FIELD] = str(val).strip()
+
+            task_entry = {
+                "project_key": project_key,
+                "summary": summary,
+                "issue_type": issue_type,
+                "additional_fields": additional if additional else None
+            }
+            tasks_json["tasks"].append(task_entry)
+
+        if not tasks_json["tasks"]:
+            return "导入失败：Excel 中没有有效的任务数据。"
+
+        # 直接调用 Jira API 批量创建
+        created = 0
+        failed = 0
+        details = []
+        for t in tasks_json["tasks"]:
+            try:
+                fields = {
+                    "project": {"key": t["project_key"]},
+                    "summary": t["summary"],
+                    "issuetype": {"name": t["issue_type"]}
+                }
+                if t.get("additional_fields"):
+                    fields.update(t["additional_fields"])
+                new_issue = jira.create_issue(fields=fields)
+                details.append(f"  ✅ {new_issue.get('key')} - {t['summary']}")
+                created += 1
+            except Exception as e:
+                details.append(f"  ❌ {t['summary']} - {str(e)}")
+                failed += 1
+
+        summary = f"📊 Excel 导入完成！共 {len(tasks_json['tasks'])} 条，成功: {created}, 失败: {failed}"
+        return summary + "\n" + "\n".join(details)
+
+    except ImportError:
+        return "导入失败：缺少 pandas 或 openpyxl 库，请运行 pip install pandas openpyxl。"
+    except Exception as e:
+        _logger.error("Excel导入失败: %s", e)
+        return f"导入失败: {str(e)}"
+
+
+@tool
+def batch_update_dates(updates_json: str = "") -> str:
+    """
+    批量更新多个 Jira 任务的开始日期和结束日期（用于维护 Jira Plan 时间线）。
+    
+    参数 updates_json：JSON 字符串，包含 updates 数组。
+    
+    格式示例：
+    {
+      "updates": [
+        {"issue_key": "KO-29", "start_date": "2025-06-01", "end_date": "2025-06-15"},
+        {"issue_key": "KO-30", "start_date": "2025-06-10", "end_date": "2025-06-20"}
+      ]
+    }
+    说明：
+      - issue_key 必填
+      - start_date 和 end_date 至少提供一个，格式 YYYY-MM-DD
+      - 如果只更新其中一个，另一个传 null 或不传
+    """
+    if not updates_json:
+        return "批量更新失败：请提供 updates_json 参数。"
+    try:
+        data = json.loads(updates_json)
+        updates = data.get("updates", [])
+        if not updates:
+            return "批量更新失败：updates 列表为空。"
+
+        results = []
+        success_count = 0
+        fail_count = 0
+
+        for i, item in enumerate(updates):
+            issue_key = item.get("issue_key", "").strip()
+            if not issue_key:
+                results.append(f"  第{i+1}项: ❌ 缺少 issue_key")
+                fail_count += 1
+                continue
+
+            try:
+                key = extract_issue_key(issue_key)
+                if not key:
+                    results.append(f"  第{i+1}项: ❌ 无效的 issue_key: {issue_key}")
+                    fail_count += 1
+                    continue
+
+                fields_to_update = {}
+                start_date = item.get("start_date")
+                end_date = item.get("end_date")
+
+                if start_date:
+                    fields_to_update[Config.TARGET_START_FIELD] = start_date
+                if end_date:
+                    fields_to_update[Config.TARGET_END_FIELD] = end_date
+
+                if not fields_to_update:
+                    results.append(f"  第{i+1}项: ❌ {key} - 未提供 start_date 或 end_date")
+                    fail_count += 1
+                    continue
+
+                jira.update_issue_field(key, fields_to_update)
+                changes = []
+                if start_date:
+                    changes.append(f"开始={start_date}")
+                if end_date:
+                    changes.append(f"结束={end_date}")
+                results.append(f"  第{i+1}项: ✅ {key} - {'; '.join(changes)}")
+                success_count += 1
+
+            except Exception as e:
+                results.append(f"  第{i+1}项: ❌ {issue_key} - {str(e)}")
+                fail_count += 1
+
+        summary_text = f"批量更新完成！成功: {success_count}, 失败: {fail_count}"
+        return f"{summary_text}\n" + "\n".join(results)
+
+    except json.JSONDecodeError:
+        return "批量更新失败：updates_json 格式无效，请提供有效的 JSON 字符串。"
+    except Exception as e:
+        _logger.error("批量更新日期失败: %s", e)
+        return f"批量更新失败: {str(e)}"

@@ -11,7 +11,9 @@ from .task_tools import (
     batch_create_issues,
     search_issues,
     assign_issue,
-    delete_issue
+    delete_issue,
+    import_from_excel,
+    batch_update_dates,
 )
 from .report_tools import generate_report, generate_portfolio_report
 from .dependency_tools import get_issue_links, get_task_dependencies
@@ -31,6 +33,8 @@ __all__ = [
     'search_issues',
     'assign_issue',
     'delete_issue',
+    'import_from_excel',
+    'batch_update_dates',
     'generate_report',
     'generate_portfolio_report',
     'get_issue_links',
