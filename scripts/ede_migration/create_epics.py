@@ -1,6 +1,11 @@
-"""按 Category 创建 Epic 并关联下属的 Task"""
+"""按 Category 创建 Epic 并关联下属的 Task
+
+用法：
+    python scripts/ede_migration/create_epics.py
+"""
 import sys, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, _BASE_DIR)
 
 from jira_client import JiraClient
 
@@ -43,7 +48,7 @@ for epic_cfg in epics_config:
     epic_name = epic_cfg["name"]
     prefix = epic_cfg["prefix"]
     keywords = epic_cfg["keywords"]
-    
+
     # 筛选匹配的 Task
     matched_tasks = []
     for task in tasks:
@@ -52,11 +57,11 @@ for epic_cfg in epics_config:
                 if kw in task["summary"]:
                     matched_tasks.append(task)
                     break
-    
+
     if not matched_tasks:
         print(f"⚠️ {epic_name}: 没有匹配的 Task，跳过")
         continue
-    
+
     # 创建 Epic
     try:
         epic_fields = {
@@ -71,7 +76,7 @@ for epic_cfg in epics_config:
     except Exception as e:
         print(f"❌ Epic 创建失败: {epic_name} - {e}")
         continue
-    
+
     # 关联 Task 到 Epic
     linked = 0
     for task in matched_tasks:
@@ -80,7 +85,7 @@ for epic_cfg in epics_config:
             linked += 1
         except Exception as e:
             print(f"  ❌ 关联失败: {task['key']} - {e}")
-    
+
     print(f"  关联 {linked}/{len(matched_tasks)} 个 Task\n")
 
 print("\n=== Epic 创建和关联完成 ===")

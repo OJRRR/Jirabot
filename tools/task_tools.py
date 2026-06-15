@@ -1,36 +1,23 @@
-"""任务查询与创建工具（重构版）"""
+"""任务查询与创建工具"""
 import json
 import re
 import os
 import logging
 from langchain.tools import tool
-from jira_client import JiraClient
 from config import Config
 from utils import fetch_all_issues, validate_project_key, extract_issue_key
+from ._lazy import LazyJira
+from .task_common import (
+    build_issue_fields,
+    build_task_dict,
+    process_additional_fields,
+)
 
 _logger = logging.getLogger("jira_bot.task_tools")
-jira = JiraClient()
+jira = LazyJira()
 
 
-def _build_task_dict(issue, include_assignee: bool = True) -> dict:
-    """构建统一的 task 字典"""
-    fields = issue.get("fields", {}) or {}
-    status = fields.get("status", {}) or {}
-    priority = fields.get("priority", {}) or {}
-    assignee = fields.get("assignee", {}) or {}
-
-    task = {
-        "key": issue.get("key"),
-        "summary": fields.get("summary"),
-        "status": status.get("name"),
-        "priority": priority.get("name"),
-        "target_start": fields.get(Config.TARGET_START_FIELD),
-        "target_end": fields.get(Config.TARGET_END_FIELD)
-    }
-    if include_assignee:
-        task["assignee"] = assignee.get("displayName", "未分配")
-    return task
-
+# ── 查询工具 ──────────────────────────────────────────────
 
 @tool
 def get_my_tasks() -> str:
@@ -45,7 +32,7 @@ def get_my_tasks() -> str:
         issues = fetch_all_issues(jira, jql_query, Config.JQL_PAGE_SIZE)
 
         max_count = Config.MAX_TASKS_PER_TOOL
-        tasks = [_build_task_dict(issue) for issue in issues[:max_count] if issue]
+        tasks = [build_task_dict(issue) for issue in issues[:max_count] if issue]
 
         _logger.info("我的任务: 共 %d 条，返回 %d 条", len(issues), len(tasks))
         return json.dumps(
@@ -70,7 +57,7 @@ def get_project_tasks(project_key: str = "") -> str:
         issues = fetch_all_issues(jira, f"project = {key} ORDER BY updated DESC", Config.JQL_PAGE_SIZE)
 
         max_count = Config.MAX_TASKS_PER_TOOL
-        tasks = [_build_task_dict(issue) for issue in issues[:max_count] if issue]
+        tasks = [build_task_dict(issue) for issue in issues[:max_count] if issue]
 
         _logger.info("项目 %s 任务: 共 %d 条，返回 %d 条", key, len(issues), len(tasks))
         return json.dumps(
@@ -81,6 +68,70 @@ def get_project_tasks(project_key: str = "") -> str:
         _logger.error("获取项目任务失败 %s: %s", project_key, e)
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
+
+@tool
+def search_issues(query: str = "", project: str = "", status: str = "",
+                  assignee: str = "", priority: str = "", issue_type: str = "",
+                  max_results: int = 20) -> str:
+    """
+    搜索 Jira 任务，支持按项目、状态、负责人、优先级、问题类型等条件筛选。
+    所有筛选条件均为可选，会通过 AND 组合查询。
+
+    参数：
+      query - 搜索关键词（会在摘要中搜索）（可选）
+      project - 项目KEY筛选（可选，如 KO）
+      status - 状态筛选（可选，如 "In Progress", "Done"）
+      assignee - 负责人筛选（可选，用户名或 "currentUser()"）
+      priority - 优先级筛选（可选，如 High, Medium, Low）
+      issue_type - 问题类型筛选（可选，如 Task, Sub-task, Risk）
+      max_results - 最大返回条数（默认 20，受 Config.MAX_TASKS_PER_TOOL 限制）
+
+    返回 JSON 字符串，包含匹配的任务列表及 truncated 字段（是否被截断）。
+    """
+    try:
+        jql_parts = []
+
+        if project:
+            jql_parts.append(f"project = {project}")
+        if status:
+            jql_parts.append(f'status = "{status}"')
+        if assignee:
+            if assignee.lower() == "currentUser()" or assignee.lower() == "me":
+                jql_parts.append("assignee = currentUser()")
+            else:
+                jql_parts.append(f'assignee = "{assignee}"')
+        if priority:
+            jql_parts.append(f'priority = "{priority}"')
+        if issue_type:
+            jql_parts.append(f'issuetype = "{issue_type}"')
+        if query:
+            jql_parts.append(f'summary ~ "{query}"')
+
+        if not jql_parts:
+            return json.dumps({"error": "请至少提供一个搜索条件。"}, ensure_ascii=False)
+
+        jql_query = " AND ".join(jql_parts) + " ORDER BY updated DESC"
+
+        _logger.info("搜索任务: %s", jql_query)
+        issues = fetch_all_issues(jira, jql_query, Config.JQL_PAGE_SIZE)
+
+        max_count = min(max_results, Config.MAX_TASKS_PER_TOOL)
+        tasks = [build_task_dict(issue) for issue in issues[:max_count] if issue]
+
+        return json.dumps({
+            "success": True,
+            "jql": jql_query,
+            "total": len(issues),
+            "returned": len(tasks),
+            "tasks": tasks,
+            "truncated": len(issues) > max_count,
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        _logger.error("搜索任务失败: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ── 创建 / 更新 / 写入类工具 ──────────────────────────────
 
 @tool
 def get_create_issue_metadata(project_key: str = "", issue_type_name: str = None) -> str:
@@ -174,39 +225,12 @@ def create_issue(project_key: str = "", summary: str = "", issue_type: str = "",
         key = validate_project_key(project_key)
         _logger.info("创建Issue: %s / %s / %s", key, issue_type, summary)
 
-        fields = {
-            "project": {"key": key},
-            "summary": summary,
-            "issuetype": {"name": issue_type}
-        }
-
-        if description:
-            fields["description"] = {
-                "type": "doc",
-                "version": 1,
-                "content": [{"type": "paragraph", "content": [{"type": "text", "text": description}]}]
-            }
-
-        if parent_key:
-            fields["parent"] = {"key": parent_key}
-
-        if epic_link_key:
-            if issue_type.lower() == "sub-task":
-                return ("创建失败：Epic 不能直接关联 Sub-task，层级关系为 Epic → Task → Sub-task。\n"
-                        "请将 Sub-task 的父任务设为 Task，再将 Task 关联到 Epic。")
-            epic_field_id = Config.EPIC_LINK_FIELD_ID
-            if epic_field_id:
-                fields[epic_field_id] = epic_link_key
-
-        if additional_fields:
-            # Jira API 要求选项类型自定义字段的值用 {"value": "选项名"} 格式
-            processed = {}
-            for k, v in additional_fields.items():
-                if k.startswith("customfield") and isinstance(v, str):
-                    processed[k] = {"value": v}
-                else:
-                    processed[k] = v
-            fields.update(processed)
+        fields, err = build_issue_fields(
+            key, summary, issue_type, description, parent_key, epic_link_key, additional_fields,
+        )
+        if err:
+            # build_issue_fields 已经把 "Epic 不能直接关联 Sub-task" 这类业务错误封装好
+            return f"创建失败: {err}"
 
         new_issue = jira.create_issue(fields=fields)
         issue_key = new_issue.get("key")
@@ -224,10 +248,6 @@ def create_issue(project_key: str = "", summary: str = "", issue_type: str = "",
         _logger.error("创建失败: %s", error_msg)
         missing_fields = []
         if "required" in error_msg.lower():
-            # 匹配多种 Jira 错误格式:
-            # 1. "required field 'customfield_12345' is missing"
-            # 2. "Role Name is required"
-            # 3. "required field 'Role Name'"
             patterns = [
                 re.compile(r"required field '?(\w+)'? is missing", re.IGNORECASE),
                 re.compile(r"'?(\w+(?:\s+\w+)*)'? is required", re.IGNORECASE),
@@ -323,14 +343,7 @@ def update_issue(issue_key: str = "", summary: str = None, description: str = No
             }
         if priority is not None:
             fields["priority"] = {"name": priority}
-        if additional_fields:
-            processed = {}
-            for k, v in additional_fields.items():
-                if k.startswith("customfield") and isinstance(v, str):
-                    processed[k] = {"value": v}
-                else:
-                    processed[k] = v
-            fields.update(processed)
+        fields.update(process_additional_fields(additional_fields))
 
         if not fields:
             return "更新失败：至少需要提供一个待更新的字段。"
@@ -398,9 +411,9 @@ def add_issue_worklog(issue_key: str = "", time_spent: str = "", comment: str = 
 @tool
 def batch_create_issues(issues_json: str = "") -> str:
     """
-    批量创建多个 Jira 任务。一次调用可创建多个任务（支持 Sub-task、Epic关联等）。
+    批量创建多个 Jira 任务（使用 Jira bulk API，每次最多 50 条并发提交）。
     参数 issues_json：JSON 字符串，包含 tasks 数组，每个 task 的结构与 create_issue 一致。
-    
+
     issues_json 格式示例：
     {
       "tasks": [
@@ -428,11 +441,13 @@ def batch_create_issues(issues_json: str = "") -> str:
         tasks = data.get("tasks", [])
         if not tasks:
             return "批量创建失败：tasks 列表为空。"
-        
-        results = []
-        success_count = 0
+
+        # 先做逐条校验，把合法任务的 fields 收集起来，非法任务直接进失败列表
+        fields_list = []           # 真正要提交到 bulk 的 fields
+        task_index_in_batch = []   # 与 fields_list 一一对应的原 tasks 下标
+        results = [""] * len(tasks)
         fail_count = 0
-        
+
         for i, task in enumerate(tasks):
             project_key = task.get("project_key", "")
             summary = task.get("summary", "")
@@ -441,130 +456,69 @@ def batch_create_issues(issues_json: str = "") -> str:
             parent_key = task.get("parent_key")
             epic_link_key = task.get("epic_link_key")
             additional_fields = task.get("additional_fields")
-            
-            if not project_key or not summary or not issue_type:
-                results.append(f"  第{i+1}个任务: ❌ 缺少必填字段 (project_key/summary/issue_type)")
+
+            try:
+                pk = validate_project_key(project_key)
+            except ValueError as e:
+                results[i] = f"  第{i+1}个任务: ❌ {summary or '(无标题)'} - {e}"
                 fail_count += 1
                 continue
-            
-            try:
-                # 复用 create_issue 的字段构建逻辑
-                fields = {
-                    "project": {"key": project_key},
-                    "summary": summary,
-                    "issuetype": {"name": issue_type}
-                }
-                if description:
-                    fields["description"] = {
-                        "type": "doc",
-                        "version": 1,
-                        "content": [{"type": "paragraph", "content": [{"type": "text", "text": description}]}]
-                    }
-                if parent_key:
-                    fields["parent"] = {"key": parent_key}
-                if epic_link_key and Config.EPIC_LINK_FIELD_ID:
-                    if issue_type.lower() == "sub-task":
-                        results.append(f"  第{i+1}个任务: ❌ {summary} - Epic 不能直接关联 Sub-task")
-                        fail_count += 1
-                        continue
-                    fields[Config.EPIC_LINK_FIELD_ID] = epic_link_key
-                if additional_fields:
-                    processed = {}
-                    for k, v in additional_fields.items():
-                        if k.startswith("customfield") and isinstance(v, str):
-                            processed[k] = {"value": v}
-                        else:
-                            processed[k] = v
-                    fields.update(processed)
-                
-                new_issue = jira.create_issue(fields=fields)
-                issue_key = new_issue.get("key")
-                results.append(f"  第{i+1}个任务: ✅ {issue_key} - {summary}")
-                success_count += 1
-            except Exception as e:
-                error_msg = str(e)
-                # 友好化常见错误
-                friendly = None
-                if "Operation value must be a string" in error_msg:
-                    friendly = f"可能的必填字段缺失（如 Role Name），请通过 additional_fields 补充。"
-                elif "Role Name is required" in error_msg:
-                    friendly = f"缺少必填字段 Role Name，请在 additional_fields 中设置。"
-                elif "cannot be set" in error_msg.lower() and "not on the appropriate screen" in error_msg.lower():
-                    friendly = f"字段ID错误或不在创建界面上，请检查字段ID是否正确。"
-                if friendly:
-                    results.append(f"  第{i+1}个任务: ❌ {summary} - {friendly}")
-                else:
-                    results.append(f"  第{i+1}个任务: ❌ {summary} - {error_msg}")
+
+            fields, err = build_issue_fields(
+                pk, summary, issue_type, description, parent_key, epic_link_key, additional_fields
+            )
+            if err:
+                results[i] = f"  第{i+1}个任务: ❌ {summary or '(无标题)'} - {err}"
                 fail_count += 1
-        
+                continue
+
+            fields_list.append(fields)
+            task_index_in_batch.append(i)
+
+        success_count = 0
+        if fields_list:
+            bulk_resp = jira.bulk_create_issues(fields_list)
+            created_issues = bulk_resp.get("created", [])
+            errors = bulk_resp.get("errors", [])
+
+            # 用 errors 里的 index 反查原 tasks 下标
+            err_by_index = {}
+            for e in errors:
+                idx = e.get("index")
+                if idx is not None and 0 <= idx < len(task_index_in_batch):
+                    err_by_index[task_index_in_batch[idx]] = e
+
+            for j, orig_i in enumerate(task_index_in_batch):
+                if j < len(created_issues) and orig_i not in err_by_index:
+                    it = created_issues[j] or {}
+                    issue_key = it.get("key") or it.get("id") or "?"
+                    summary = tasks[orig_i].get("summary", "")
+                    results[orig_i] = f"  第{orig_i+1}个任务: ✅ {issue_key} - {summary}"
+                    success_count += 1
+                else:
+                    err = err_by_index.get(orig_i, {})
+                    err_text = (err.get("error") or err.get("errorMessages") or "未知错误")
+                    if isinstance(err_text, list):
+                        err_text = "; ".join(str(x) for x in err_text)
+                    friendly = None
+                    err_lc = str(err_text).lower()
+                    if "operation value must be a string" in err_lc:
+                        friendly = "可能的必填字段缺失（如 Role Name），请通过 additional_fields 补充。"
+                    elif "role name is required" in err_lc:
+                        friendly = "缺少必填字段 Role Name，请在 additional_fields 中设置。"
+                    elif "not on the appropriate screen" in err_lc:
+                        friendly = "字段ID错误或不在创建界面上，请检查字段ID是否正确。"
+                    summary = tasks[orig_i].get("summary", "")
+                    results[orig_i] = f"  第{orig_i+1}个任务: ❌ {summary} - {friendly or err_text}"
+                    fail_count += 1
+
         summary_text = f"批量创建完成！成功: {success_count}, 失败: {fail_count}"
-        return f"{summary_text}\n" + "\n".join(results)
+        return summary_text + "\n" + "\n".join(r for r in results if r)
     except json.JSONDecodeError:
         return f"批量创建失败：issues_json 格式无效，请提供有效的 JSON 字符串。"
     except Exception as e:
         _logger.error("批量创建失败: %s", e)
         return f"批量创建失败: {str(e)}"
-
-
-@tool
-def search_issues(query: str = "", project: str = "", status: str = "",
-                  assignee: str = "", priority: str = "", issue_type: str = "",
-                  max_results: int = 20) -> str:
-    """
-    搜索 Jira 任务，支持按项目、状态、负责人、优先级、问题类型等条件筛选。
-    所有筛选条件均为可选，会通过 AND 组合查询。
-    
-    参数：
-      query - 搜索关键词（会在摘要中搜索）（可选）
-      project - 项目KEY筛选（可选，如 KO）
-      status - 状态筛选（可选，如 "In Progress", "Done"）
-      assignee - 负责人筛选（可选，用户名或 "currentUser()"）
-      priority - 优先级筛选（可选，如 High, Medium, Low）
-      issue_type - 问题类型筛选（可选，如 Task, Sub-task, Risk）
-      max_results - 最大返回条数（默认 20，最大 50）
-    
-    返回 JSON 字符串，包含匹配的任务列表。
-    """
-    try:
-        jql_parts = []
-        
-        if project:
-            jql_parts.append(f"project = {project}")
-        if status:
-            jql_parts.append(f'status = "{status}"')
-        if assignee:
-            if assignee.lower() == "currentUser()" or assignee.lower() == "me":
-                jql_parts.append("assignee = currentUser()")
-            else:
-                jql_parts.append(f'assignee = "{assignee}"')
-        if priority:
-            jql_parts.append(f'priority = "{priority}"')
-        if issue_type:
-            jql_parts.append(f'issuetype = "{issue_type}"')
-        if query:
-            jql_parts.append(f'summary ~ "{query}"')
-        
-        if not jql_parts:
-            return json.dumps({"error": "请至少提供一个搜索条件。"}, ensure_ascii=False)
-        
-        jql_query = " AND ".join(jql_parts) + " ORDER BY updated DESC"
-        
-        _logger.info("搜索任务: %s", jql_query)
-        issues = fetch_all_issues(jira, jql_query, Config.JQL_PAGE_SIZE)
-        
-        max_count = min(max_results, 50)
-        tasks = [_build_task_dict(issue) for issue in issues[:max_count] if issue]
-        
-        return json.dumps({
-            "success": True,
-            "jql": jql_query,
-            "total": len(issues),
-            "returned": len(tasks),
-            "tasks": tasks
-        }, ensure_ascii=False, indent=2)
-    except Exception as e:
-        _logger.error("搜索任务失败: %s", e)
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
 @tool
@@ -581,7 +535,7 @@ def assign_issue(issue_key: str = "", assignee: str = "") -> str:
         key = extract_issue_key(issue_key)
         if not key:
             return "分配失败：请提供有效的任务Key。"
-        
+
         _logger.info("分配任务: %s -> %s", key, assignee)
         jira.assign_issue(key, assignee)
         return f"✅ 已将 {key} 分配给 {assignee}。"
@@ -595,7 +549,7 @@ def delete_issue(issue_key: str = "", delete_subtasks: bool = True, confirmed: b
     """
     删除指定的 Jira Issue。
     警告：此操作不可逆，请谨慎使用！
-    
+
     参数：
       issue_key - 要删除的任务KEY（必填）
       delete_subtasks - 如果该 Issue 有子任务，是否一并删除（默认 True，设为 False 则删除失败）
@@ -607,11 +561,11 @@ def delete_issue(issue_key: str = "", delete_subtasks: bool = True, confirmed: b
         key = extract_issue_key(issue_key)
         if not key:
             return "删除失败：请提供有效的任务Key。"
-        
+
         if not confirmed:
             _logger.warning("用户请求删除Issue: %s (delete_subtasks=%s)", key, delete_subtasks)
             return f"⚠️ 删除操作有风险，此操作不可逆！请确认：(回复「确认删除 {key}」以继续)"
-        
+
         # confirmed=True，执行删除
         _logger.warning("用户确认删除Issue: %s", key)
         jira.delete_issue(key, delete_subtasks=delete_subtasks)
@@ -626,11 +580,12 @@ def delete_issue(issue_key: str = "", delete_subtasks: bool = True, confirmed: b
 def import_from_excel(file_path: str = "", project_key: str = "",
                       summary_col: str = "", issue_type_col: str = "",
                       start_date_col: str = "", end_date_col: str = "",
-                      sheet_name: str = "Sheet1", header_row: int = 0) -> str:
+                      sheet_name: str = "Sheet1", header_row: int = 0,
+                      dry_run: bool = False) -> str:
     """
-    从 Excel (.xlsx) 文件导入并批量创建 Jira 任务。
+    从 Excel (.xlsx) 文件导入并批量创建 Jira 任务（使用 Jira bulk API，≤50 条/批）。
     自动解析列内容，建议提供列名映射以准确识别。
-    
+
     参数：
       file_path - Excel 文件的完整路径（必填）
       project_key - 目标项目 KEY（必填）
@@ -640,6 +595,8 @@ def import_from_excel(file_path: str = "", project_key: str = "",
       end_date_col - 结束日期列的列名（可选）
       sheet_name - 工作表名称，默认 Sheet1
       header_row - 表头行号，默认 0（第一行）
+      dry_run - 预览模式（默认 False）。True 时只解析并返回待创建任务列表，不写 Jira。
+               建议流程：先用 dry_run=True 让用户确认内容，再调一次 dry_run=False 执行创建。
     """
     import pandas as pd
     from datetime import datetime, date
@@ -679,11 +636,7 @@ def import_from_excel(file_path: str = "", project_key: str = "",
             summary_col_found = headers[0]
             _logger.warning("未找到标题列，默认使用第一列: %s", summary_col_found)
 
-        results = []
-        success_count = 0
-        fail_count = 0
-        tasks_json = {"tasks": []}
-
+        parsed_tasks = []  # [(row_index, fields_or_error)]
         for idx, row in df.iterrows():
             summary = str(row.get(summary_col_found, "")).strip()
             if pd.isna(summary) or not summary or summary == "nan":
@@ -720,39 +673,82 @@ def import_from_excel(file_path: str = "", project_key: str = "",
                     else:
                         additional[Config.TARGET_END_FIELD] = str(val).strip()
 
-            task_entry = {
-                "project_key": project_key,
-                "summary": summary,
-                "issue_type": issue_type,
-                "additional_fields": additional if additional else None
-            }
-            tasks_json["tasks"].append(task_entry)
+            fields, err = build_issue_fields(
+                project_key, summary, issue_type, "", None, None,
+                additional if additional else None,
+            )
+            parsed_tasks.append((idx, summary, issue_type, fields, err))
 
-        if not tasks_json["tasks"]:
+        valid = [t for t in parsed_tasks if t[4] is None and t[3] is not None]
+        invalid = [t for t in parsed_tasks if t[4] is not None]
+
+        if not valid and not invalid:
             return "导入失败：Excel 中没有有效的任务数据。"
 
-        # 直接调用 Jira API 批量创建
-        created = 0
-        failed = 0
-        details = []
-        for t in tasks_json["tasks"]:
-            try:
-                fields = {
-                    "project": {"key": t["project_key"]},
-                    "summary": t["summary"],
-                    "issuetype": {"name": t["issue_type"]}
-                }
-                if t.get("additional_fields"):
-                    fields.update(t["additional_fields"])
-                new_issue = jira.create_issue(fields=fields)
-                details.append(f"  ✅ {new_issue.get('key')} - {t['summary']}")
-                created += 1
-            except Exception as e:
-                details.append(f"  ❌ {t['summary']} - {str(e)}")
-                failed += 1
+        # ── Dry-run 预览：不写 Jira，把待创建清单返回 ──
+        if dry_run:
+            preview = []
+            for _, summary, issue_type, fields, _ in valid:
+                preview.append({
+                    "project_key": project_key,
+                    "summary": summary,
+                    "issue_type": issue_type,
+                    "additional_fields": fields,
+                })
+            payload = {
+                "dry_run": True,
+                "total_rows": len(parsed_tasks),
+                "to_create": len(preview),
+                "invalid": len(invalid),
+                "invalid_reasons": [
+                    {"row": int(t[0]) + 2, "summary": t[1], "reason": t[4]} for t in invalid
+                ],
+                "tasks": preview,
+            }
+            msg = (
+                f"🔍 [DRY-RUN] 共解析 {len(parsed_tasks)} 行，"
+                f"待创建 {len(preview)} 条，非法 {len(invalid)} 条。\n"
+                f"⚠️ 尚未写入 Jira。请向用户确认无误后，"
+                f"再以 dry_run=False 重新调用一次。"
+            )
+            return msg + "\n" + json.dumps(payload, ensure_ascii=False, indent=2)
 
-        summary = f"📊 Excel 导入完成！共 {len(tasks_json['tasks'])} 条，成功: {created}, 失败: {failed}"
-        return summary + "\n" + "\n".join(details)
+        # ── 实际写入 Jira：bulk API（≤50/片） ──
+        fields_list = [t[3] for t in valid]
+        bulk_resp = jira.bulk_create_issues(fields_list)
+        created_issues = bulk_resp.get("created", [])
+        errors = bulk_resp.get("errors", [])
+
+        # 用 errors.index 反查 valid 列表
+        err_by_valid_idx = {e.get("index"): e for e in errors if e.get("index") is not None}
+
+        details = []
+        success_count = 0
+        fail_count = 0
+
+        for j, (idx, summary, issue_type, fields, err) in enumerate(valid):
+            if j in err_by_valid_idx:
+                e = err_by_valid_idx[j]
+                err_text = e.get("error") or e.get("errorMessages") or "未知错误"
+                if isinstance(err_text, list):
+                    err_text = "; ".join(str(x) for x in err_text)
+                details.append(f"  ❌ 第{int(idx)+2}行 {summary} - {err_text}")
+                fail_count += 1
+            elif j < len(created_issues):
+                it = created_issues[j] or {}
+                issue_key = it.get("key") or "?"
+                details.append(f"  ✅ {issue_key} - {summary}")
+                success_count += 1
+            else:
+                details.append(f"  ❌ 第{int(idx)+2}行 {summary} - 未返回结果")
+                fail_count += 1
+
+        for idx, summary, issue_type, fields, err in invalid:
+            details.append(f"  ❌ 第{int(idx)+2}行 {summary} - {err}")
+            fail_count += 1
+
+        header = f"📊 Excel 导入完成！共 {len(parsed_tasks)} 行，成功: {success_count}, 失败: {fail_count}"
+        return header + "\n" + "\n".join(details)
 
     except ImportError:
         return "导入失败：缺少 pandas 或 openpyxl 库，请运行 pip install pandas openpyxl。"
@@ -765,9 +761,9 @@ def import_from_excel(file_path: str = "", project_key: str = "",
 def batch_update_dates(updates_json: str = "") -> str:
     """
     批量更新多个 Jira 任务的开始日期和结束日期（用于维护 Jira Plan 时间线）。
-    
+
     参数 updates_json：JSON 字符串，包含 updates 数组。
-    
+
     格式示例：
     {
       "updates": [
@@ -837,7 +833,7 @@ def batch_update_dates(updates_json: str = "") -> str:
         return f"{summary_text}\n" + "\n".join(results)
 
     except json.JSONDecodeError:
-        return "批量更新失败：updates_json 格式无效，请提供有效的 JSON 字符串。"
+        return f"批量更新失败：updates_json 格式无效，请提供有效的 JSON 字符串。"
     except Exception as e:
         _logger.error("批量更新日期失败: %s", e)
         return f"批量更新失败: {str(e)}"

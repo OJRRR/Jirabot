@@ -78,6 +78,12 @@ class JiraClient:
         return self.client.get_all_projects()
 
     @retry_on_failure(max_retries=2, backoff=1.0)
+    def get_all_fields(self):
+        """获取全部自定义字段（field_detector 需要）"""
+        self._rate_limit()
+        return self.client.get_all_fields()
+
+    @retry_on_failure(max_retries=2, backoff=1.0)
     def get_issue_createmeta(self, project_key: str):
         """获取项目创建元数据（使用新版 createmeta API）"""
         self._rate_limit()
@@ -221,3 +227,70 @@ class JiraClient:
         self._rate_limit()
         _logger.warning("删除Issue: %s (delete_subtasks=%s)", issue_key, delete_subtasks)
         return self.client.delete_issue(issue_key, delete_subtasks=delete_subtasks)
+
+    # ── 批量创建 Issue（bulk API）───────────────────
+
+    BULK_CHUNK_SIZE = 50  # Jira /issue/bulk 单次上限
+
+    def bulk_create_issues(self, fields_list: list) -> dict:
+        """
+        通过 Jira bulk API 批量创建 Issue。
+        :param fields_list: list[dict]，每个 dict 是一个 Issue 的 fields（不含 issuetype.name 之外的结构差异）
+        :return: dict 形如 {"created": [...], "errors": [...], "chunks": int}
+
+        行为说明：
+        - 按 BULK_CHUNK_SIZE 自动分片
+        - 每片独立 try/except，单片失败不阻塞后续片
+        - 仍走 _rate_limit 限流
+        """
+        if not fields_list:
+            return {"created": [], "errors": [], "chunks": 0}
+
+        created_all = []
+        errors_all = []
+        chunks = 0
+        size = self.BULK_CHUNK_SIZE
+
+        for start in range(0, len(fields_list), size):
+            chunk = fields_list[start:start + size]
+            chunks += 1
+            self._rate_limit()
+            _logger.info("bulk 创建第 %d 片: %d 条", chunks, len(chunk))
+            try:
+                # Jira REST: POST /rest/api/2/issue/bulk
+                # body: {"issueUpdates": [{"fields": {...}}, ...]}
+                # 响应: {"issues": [...], "errors": [...]}
+                resp = self.client.post("issue/bulk", data={"issueUpdates": [{"fields": f} for f in chunk]})
+                if isinstance(resp, str):
+                    import json as _json
+                    resp = _json.loads(resp)
+                # atlassian-python-api 内部可能直接返回 list，也做一次兜底
+                issues = []
+                errs = []
+                if isinstance(resp, list):
+                    issues = resp
+                elif isinstance(resp, dict):
+                    # atlassian-python-api 4.x 的 /issue/bulk 响应可能带 "issues" 或 "created"
+                    issues = resp.get("issues", None)
+                    if issues is None:
+                        issues = resp.get("created", []) or []
+                    else:
+                        issues = issues or []
+                    errs = resp.get("errors", []) or []
+                for it in issues:
+                    if it:
+                        created_all.append(it)
+                if errs:
+                    errors_all.extend(errs)
+            except Exception as e:
+                _logger.error("bulk 第 %d 片失败: %s", chunks, e)
+                # 把这一片每条都标记为失败，保留原始字段供上层排查
+                for i, f in enumerate(chunk):
+                    errors_all.append({
+                        "index": start + i,
+                        "status": -1,
+                        "error": str(e),
+                        "summary": (f or {}).get("summary", ""),
+                    })
+
+        return {"created": created_all, "errors": errors_all, "chunks": chunks}

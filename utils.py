@@ -41,14 +41,21 @@ def get_logger(name: str = None) -> logging.Logger:
 
 
 # ── 分页查询（消除 3 处重复定义）────────────────────────────
-def fetch_all_issues(jira_client, jql_query: str, max_results: int = 100) -> list:
-    """分页获取所有 Issue（统一入口，消除各模块重复代码）"""
+def fetch_all_issues(jira_client, jql_query: str, max_results: int = 100,
+                     max_pages: int = 50) -> list:
+    """分页获取所有 Issue（统一入口，消除各模块重复代码）
+
+    :param jira_client: JiraClient / LazyJira 代理
+    :param jql_query: JQL 字符串
+    :param max_results: 每页大小（Jira 单页上限 100）
+    :param max_pages: 最多翻多少页（默认 50 = 5000 条）；防止误写全公司 JQL 拖到天荒地老
+    """
     all_issues = []
     start_at = 0
     page = 0
-    while True:
+    while page < max_pages:
         page += 1
-        _logger.debug("分页查询 page=%d start=%d jql=%s", page, start_at, jql_query)
+        _logger.debug("分页查询 page=%d/%d start=%d jql=%s", page, max_pages, start_at, jql_query)
         result = jira_client.jql(jql_query, start=start_at, limit=max_results)
         issues = result.get("issues", [])
         if not issues:
@@ -57,6 +64,11 @@ def fetch_all_issues(jira_client, jql_query: str, max_results: int = 100) -> lis
         start_at += max_results
         if start_at >= result.get("total", 0):
             break
+    if page >= max_pages and start_at < result.get("total", 0):
+        _logger.warning(
+            "分页查询触及 max_pages=%d 上限（已返回 %d 条，可能被截断），请收敛 JQL 或调大 max_pages",
+            max_pages, len(all_issues),
+        )
     _logger.debug("分页查询完成: 共 %d 条", len(all_issues))
     return all_issues
 
@@ -87,25 +99,6 @@ def validate_project_key(project_key: str) -> str:
 def sanitize_jql_value(value: str) -> str:
     """转义 JQL 字符串中的特殊字符"""
     return value.replace('"', '\\"').replace("'", "\\'")
-
-
-# ── 速率限制 ──────────────────────────────────────────────
-_RATE_LIMITER: dict = {"last_call": 0}
-
-
-def rate_limit(min_interval: float = 0.3):
-    """装饰器：限制函数调用频率"""
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            elapsed = time.time() - _RATE_LIMITER.get(func.__qualname__, 0)
-            if elapsed < min_interval:
-                time.sleep(min_interval - elapsed)
-            result = func(*args, **kwargs)
-            _RATE_LIMITER[func.__qualname__] = time.time()
-            return result
-        return wrapper
-    return decorator
 
 
 # ── 重试机制 ──────────────────────────────────────────────

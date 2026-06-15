@@ -2,11 +2,12 @@
 import json
 import logging
 from langchain.tools import tool
-from jira_client import JiraClient
 from utils import extract_issue_key
+from .constants import is_done
+from ._lazy import LazyJira
 
 _logger = logging.getLogger("jira_bot.dependency_tools")
-jira = JiraClient()
+jira = LazyJira()
 
 
 def parse_issue_links(issue_links):
@@ -84,10 +85,10 @@ def get_task_dependencies(issue_key: str = "") -> str:
 
         risks = []
         for dep in outgoing:
-            if dep.get("status") != "Done":
+            if not is_done(dep.get("status")):
                 risks.append(f"依赖 {dep['key']} 未完成，可能阻塞当前任务")
         for dep in incoming:
-            if dep.get("status") != "Done":
+            if not is_done(dep.get("status")):
                 risks.append(f"被 {dep['key']} 依赖，该任务进度可能受影响")
 
         return json.dumps({

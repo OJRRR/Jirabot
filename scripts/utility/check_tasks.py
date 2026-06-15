@@ -1,5 +1,12 @@
+"""列出 EDE 项目所有 Task
+
+用法：
+    python scripts/utility/check_tasks.py
+"""
 import sys, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, _BASE_DIR)
+
 from jira_client import JiraClient
 
 jira = JiraClient().get_client()

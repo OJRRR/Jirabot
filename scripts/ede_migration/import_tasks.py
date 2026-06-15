@@ -1,6 +1,11 @@
-"""从图片识别数据，批量导入 EDE 项目（日期写入描述，因EDE项目Task无Target start/end字段）"""
+"""从图片识别数据，批量导入 EDE 项目（日期写入描述，因EDE项目Task无Target start/end字段）
+
+用法：
+    python scripts/ede_migration/import_tasks.py
+"""
 import sys, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, _BASE_DIR)
 
 from jira_client import JiraClient
 
@@ -11,11 +16,11 @@ tasks = [
     {"summary": "[PDC] Solution Confirm & Budget Release",       "start": "2026-04-01", "end": "2026-06-01"},
     {"summary": "[PDC] Infra Requirements confirm",              "start": "2026-05-01", "end": "2026-06-01"},
     {"summary": "[PDC] procurement & contract execution",        "start": "2026-06-01", "end": "2026-09-01"},
-    {"summary": "[PDC] Data Center Build Out (4months)",        "start": "2026-10-01", "end": "2027-03-01"},
+    {"summary": "[PDC] Data Center Build Out (4months)",        "start": "2026-09-01", "end": "2027-01-01"},
     {"summary": "[PDC] wave 1 - Rack & Cabling Devices & PDU",  "start": "2027-01-01", "end": "2027-03-01"},
-    {"summary": "[PDC] wave 1 - Network Device Order & Delivery","start": "2026-01-01", "end": "2026-11-01"},
+    {"summary": "[PDC] wave 1 - Network Device Order & Delivery","start": "2026-07-01", "end": "2027-01-01"},
     {"summary": "[PDC] wave 1 - Network Configuration",         "start": "2027-01-01", "end": "2027-03-01"},
-    {"summary": "[PDC] wave 1 - Server & Storage Order & Delivery","start": "2026-07-01", "end": "2026-11-01"},
+    {"summary": "[PDC] wave 1 - Server & Storage Order & Delivery","start": "2026-07-01", "end": "2027-01-01"},
     {"summary": "[PDC] wave 1 - Private Cloud Platform Implementation","start": "2027-02-01", "end": "2027-05-01"},
     {"summary": "[PDC] wave 1 - Bare Metal Implementation",     "start": "2027-02-01", "end": "2027-04-01"},
     {"summary": "[PDC] wave 1 - Tool Platform Implementation",  "start": "2027-04-01", "end": "2027-05-01"},
@@ -32,8 +37,8 @@ tasks = [
     {"summary": "[PDC] Infra Wave 2 Go-live",                   "start": "2027-09-01", "end": "2027-09-01"},
 
     # === Secondary DC (DR) ===
-    {"summary": "[DR] DR scope confirm",                        "start": "2027-03-01", "end": "2027-10-01"},
-    {"summary": "[DR] Budget Release",                          "start": "2027-03-01", "end": "2027-10-01"},
+    {"summary": "[DR] DR scope confirm",                        "start": "2027-03-01", "end": "2028-01-01"},
+    {"summary": "[DR] Budget Release",                          "start": "2027-03-01", "end": "2028-01-01"},
     {"summary": "[DR] Data Center Build Out (4 months)",        "start": "2027-10-01", "end": "2028-02-01"},
     {"summary": "[DR] Rack & Cabling Devices & PDU",            "start": "2028-02-01", "end": "2028-03-01"},
     {"summary": "[DR] Network Device Order & Delivery",         "start": "2027-10-01", "end": "2028-02-01"},

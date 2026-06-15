@@ -1,0 +1,15 @@
+﻿services:
+  jira-bot:
+    build: .
+    container_name: jira-bot
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    volumes:
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+      - ./sessions:/app/sessions
+    restart: unless-stopped

@@ -2,3 +2,11 @@
 *.pyc
 __pycache__/
 reports/*.html
+# 运行时生成的目录
+sessions/
+uploads/
+logs/
+
+# Python 虚拟环境
+.venv/
+venv/

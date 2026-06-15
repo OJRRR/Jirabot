@@ -3,12 +3,13 @@ import json
 import logging
 from datetime import datetime
 from langchain.tools import tool
-from jira_client import JiraClient
 from config import Config
 from utils import fetch_all_issues, validate_project_key
+from .constants import is_done, is_high_priority, is_medium_priority
+from ._lazy import LazyJira
 
 _logger = logging.getLogger("jira_bot.risk_extractor")
-jira = JiraClient()
+jira = LazyJira()
 
 
 def get_project_risks(project_key: str) -> dict:
@@ -18,7 +19,7 @@ def get_project_risks(project_key: str) -> dict:
         _logger.debug("查询风险项: %s", jql_query)
         issues_list = fetch_all_issues(jira, jql_query, Config.JQL_PAGE_SIZE)
         if not issues_list:
-            return {"project": project_key, "risks": [], "error": None}
+            return {"project": project_key, "risks": [], "total": 0, "error": None}
 
         risks = []
         for issue in issues_list:
@@ -55,10 +56,13 @@ def get_project_risks(project_key: str) -> dict:
 
 
 @tool
-def extract_issue_risks(project_key: str = None) -> str:
+def extract_issue_risks(project_key: str = None, summary_only: bool = False) -> str:
     """
     从 Jira 中提取 Issue Type 为 Risk 的任务并归纳总结。
-    参数：project_key - 可选，指定项目KEY（如 KO），不传则分析所有配置的项目。
+    参数：
+      project_key - 可选，指定项目KEY（如 KO），不传则分析所有配置的项目。
+      summary_only - 默认 False。True 时只输出关键数字 + Top-5 高优先级 + Top-5 进行中，
+                     不输出各项目列表、按状态/优先级分布等大段文本，节省 token。
     """
     try:
         if project_key:
@@ -72,7 +76,7 @@ def extract_issue_risks(project_key: str = None) -> str:
         if not project_list:
             return "无法确定要分析的项目"
 
-        _logger.info("提取风险项，项目数: %d", len(project_list))
+        _logger.info("提取风险项，项目数: %d (summary_only=%s)", len(project_list), summary_only)
 
         all_projects_risks = []
         total_risks = 0
@@ -93,13 +97,13 @@ def extract_issue_risks(project_key: str = None) -> str:
                 status = risk["status"]
                 summary_by_status[status] = summary_by_status.get(status, 0) + 1
 
-                if risk["priority"] in ("Highest", "High", "紧急", "高"):
+                if is_high_priority(risk["priority"]):
                     high_priority_risks.append({
                         "project": proj_key, "key": risk["key"],
                         "summary": risk["summary"], "status": risk["status"],
                         "assignee": risk["assignee"]
                     })
-                if risk["status"] not in ("Done", "Closed", "已关闭", "已完成"):
+                if not is_done(risk["status"]):
                     open_risks.append({
                         "project": proj_key, "key": risk["key"],
                         "summary": risk["summary"], "priority": risk["priority"],
@@ -108,18 +112,40 @@ def extract_issue_risks(project_key: str = None) -> str:
 
         return _generate_risk_summary(all_projects_risks, total_risks,
                                       summary_by_priority, summary_by_status,
-                                      high_priority_risks, open_risks)
+                                      high_priority_risks, open_risks,
+                                      summary_only=summary_only)
     except Exception as e:
         _logger.error("提取风险失败: %s", e)
         return f"提取风险失败: {str(e)}"
 
 
 def _generate_risk_summary(all_projects_risks, total_risks, summary_by_priority,
-                           summary_by_status, high_priority_risks, open_risks):
+                           summary_by_status, high_priority_risks, open_risks,
+                           summary_only: bool = False):
     """生成格式化的风险总结（内部辅助函数）"""
     if total_risks == 0:
         return "未发现任何 Risk 类型的 Issue。"
 
+    if summary_only:
+        # 极简版：关键数字 + Top-5 高优先级 + Top-5 进行中
+        lines = [f"📊 风险概览：共 {total_risks} 个"]
+        if summary_by_priority:
+            parts = [f"{p}: {c}" for p, c in sorted(summary_by_priority.items(),
+                                                    key=lambda x: -x[1])]
+            lines.append("按优先级：" + " / ".join(parts))
+        if high_priority_risks:
+            lines.append("")
+            lines.append("🔥 Top-5 高优先级：")
+            for risk in high_priority_risks[:5]:
+                lines.append(f"  • {risk['key']} [{risk['project']}] - {risk['summary'][:50]}")
+        if open_risks:
+            lines.append("")
+            lines.append("⏳ Top-5 进行中：")
+            for risk in open_risks[:5]:
+                lines.append(f"  • {risk['key']} [{risk['project']}] - {risk['summary'][:50]}")
+        return "\n".join(lines)
+
+    # 完整版
     lines = []
     lines.append("=" * 60)
     lines.append("Jira 风险项汇总报告 (Issue Type = Risk)")
@@ -142,8 +168,12 @@ def _generate_risk_summary(all_projects_risks, total_risks, summary_by_priority,
     if summary_by_priority:
         lines.append("按优先级分布：")
         for priority, count in sorted(summary_by_priority.items()):
-            icon = {"Highest": "🔴", "High": "🔴", "紧急": "🔴", "高": "🔴",
-                    "Medium": "🟡", "中": "🟡"}.get(priority, "🟢")
+            if is_high_priority(priority):
+                icon = "🔴"
+            elif is_medium_priority(priority):
+                icon = "🟡"
+            else:
+                icon = "🟢"
             lines.append(f"   {icon} {priority}: {count} 个")
 
     lines.append("")
@@ -177,32 +207,8 @@ def _generate_risk_summary(all_projects_risks, total_risks, summary_by_priority,
 
 def get_risk_html_rows(project_key: str) -> str:
     """获取项目的 Risk 列表 HTML 行（用于报告嵌入，非工具）"""
+    from .risk_render import render_risk_rows_html
     result = get_project_risks(project_key)
     if result["error"] or not result["risks"]:
         return ""
-
-    rows = []
-    for risk in result["risks"]:
-        if risk["priority"] in ("Highest", "High", "紧急", "高"):
-            cls = "risk-high"
-        elif risk["priority"] in ("Medium", "中"):
-            cls = "risk-medium"
-        else:
-            cls = "risk-low"
-
-        status_icon = "✅" if risk["status"] in ("Done", "Closed", "已关闭", "已完成") else \
-                      ("🔄" if risk["status"] in ("In Progress", "进行中") else "⏳")
-
-        rows.append(f"""
-            <tr>
-                <td><strong>{risk['key']}</strong></td>
-                <td><a href="{Config.JIRA_SERVER}/browse/{risk['key']}" target="_blank"
-                       style="color:#667eea;">{risk['key']}</a></td>
-                <td>{risk['summary'][:70]}</td>
-                <td class="{cls}">{risk['priority'] or '-'}</td>
-                <td>{status_icon} {risk['status']}</td>
-                <td>{risk['assignee']}</td>
-                <td>{risk['target_end'] or '-'}</td>
-            </tr>""")
-
-    return "\n".join(rows)
+    return render_risk_rows_html(result["risks"])

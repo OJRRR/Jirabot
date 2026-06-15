@@ -1,6 +1,6 @@
 """配置管理模块（重构版）"""
 import os
-import glob
+import re
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -40,7 +40,12 @@ class Config:
     PROJECTS_CONFIG = os.getenv("PROJECTS", "").strip()
     TARGET_PROJECTS = None
     if PROJECTS_CONFIG and PROJECTS_CONFIG.upper() != "ALL":
-        TARGET_PROJECTS = [p.strip().upper() for p in PROJECTS_CONFIG.split(",") if p.strip()]
+        # 同时支持半角 "," 和全角 "，"（避免 .env 误用全角逗号导致整个项目被吞）
+        TARGET_PROJECTS = [
+            p.strip().upper()
+            for p in re.split(r"[,，]\s*", PROJECTS_CONFIG)
+            if p.strip()
+        ]
 
     # ── 自定义字段ID ──────────────────────────
     TARGET_START_FIELD = os.getenv("TARGET_START_FIELD", "customfield_12914")
@@ -75,13 +80,15 @@ class Config:
     def get_build_jql(cls, base_jql: str) -> str:
         """根据配置的项目添加过滤"""
         if cls.TARGET_PROJECTS:
-            project_filter = f"project IN ({','.join(cls.TARGET_PROJECTS)})"
+            # 给 KEY 加引号，防止含特殊字符的项目破 JQL
+            project_filter = "project IN (" + ",".join(f'"{k}"' for k in cls.TARGET_PROJECTS) + ")"
             return f"{base_jql} AND {project_filter}"
         return base_jql
 
     @classmethod
     def cleanup_old_reports(cls) -> int:
         """清理超过 REPORT_MAX_AGE_DAYS 天的旧报告文件，返回删除数量"""
+        import glob  # 仅在调用时引入，避免模块导入期加载
         cutoff = datetime.now() - timedelta(days=cls.REPORT_MAX_AGE_DAYS)
         deleted = 0
         pattern = os.path.join(cls.REPORTS_DIR, "*.html")

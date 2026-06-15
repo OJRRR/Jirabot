@@ -1,6 +1,12 @@
-"""清理重复任务和测试数据"""
+"""清理重复任务和测试数据（EDE 项目上线期的一次性脚本）
+
+用法：
+    python scripts/ede_migration/cleanup.py
+"""
 import sys, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, _BASE_DIR)
+
 from jira_client import JiraClient
 
 jira = JiraClient().get_client()
