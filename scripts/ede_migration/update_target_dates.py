@@ -15,8 +15,8 @@ from config import Config
 
 jira = JiraClient().get_client()
 
-TARGET_START = Config.TARGET_START_FIELD  # customfield_12914
-TARGET_END   = Config.TARGET_END_FIELD    # customfield_12915
+TARGET_START = Config.TARGET_START_FIELD  # customfield_16519
+TARGET_END   = Config.TARGET_END_FIELD    # customfield_16520
 
 # ── 从共享 JSON 读取日期表（与 v2 共用同一份数据）──
 _PLAN_PATH = os.path.join(_BASE_DIR, "data", "ede_plan.json")

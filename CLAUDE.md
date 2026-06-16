@@ -3,6 +3,12 @@
 
 本项目已安装 superpowers-zh 技能框架（20 个 skills）。
 
+## 项目文档
+
+项目文档位于 `docs/` 目录，需要时可主动读取：
+- **docs/REVIEW_NOTES.md** — 审查笔记与注意事项
+- **docs/FEATURES.md** — 功能列表
+
 ## 核心规则
 
 1. **收到任务时，先检查是否有匹配的 skill** — 哪怕只有 1% 的可能性也要检查

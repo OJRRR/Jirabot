@@ -1,4 +1,16 @@
-"""配置管理模块（重构版）"""
+"""配置管理模块（按职责拆分，保持向后兼容）
+
+Config 作为统一入口，将各类配置委托给子配置类：
+  - JiraConfig:   Jira 连接凭证、字段ID
+  - PathConfig:   目录路径（报告/模板/日志/上传）
+  - ModelConfig:  LLM 模型配置
+  - QueryConfig:  查询分页限制、并发数
+  - RiskConfig:   风险评分阈值
+  - ProjectConfig: 目标项目列表、JQL 构建
+  - ReportConfig: 报告清理策略
+
+所有子配置通过 Config 类属性访问，保持旧代码兼容。
+"""
 import os
 import re
 from datetime import datetime, timedelta
@@ -6,89 +18,169 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-class Config:
-    """全局配置类"""
 
-    # ── Jira 配置 ──────────────────────────────
-    JIRA_SERVER = os.getenv("JIRA_SERVER")
-    JIRA_USER = os.getenv("JIRA_USER")
-    JIRA_TOKEN = os.getenv("JIRA_TOKEN")
+# ── 子配置类 ──────────────────────────────────────────────────
 
-    # ── 目录配置（必须放在最前面）─────────────
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    REPORTS_DIR = os.getenv("REPORTS_DIR", os.path.join(BASE_DIR, "reports"))
-    TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
-    LOG_DIR = os.path.join(BASE_DIR, "logs")
-    LOG_FILE = os.path.join(LOG_DIR, "jira_bot.log")
+class JiraConfig:
+    """Jira 连接凭证与字段配置"""
+    SERVER   = os.getenv("JIRA_SERVER")
+    USER     = os.getenv("JIRA_USER")
+    TOKEN    = os.getenv("JIRA_TOKEN")
+    TARGET_START_FIELD = os.getenv("TARGET_START_FIELD", "customfield_16519")
+    TARGET_END_FIELD   = os.getenv("TARGET_END_FIELD",   "customfield_16520")
+    EPIC_LINK_FIELD_ID = os.getenv("EPIC_LINK_FIELD_ID")
 
-    os.makedirs(REPORTS_DIR, exist_ok=True)
+
+class PathConfig:
+    """目录路径配置"""
+    BASE_DIR     = _BASE_DIR
+    REPORTS_DIR  = os.getenv("REPORTS_DIR", os.path.join(_BASE_DIR, "reports"))
+    TEMPLATE_DIR = os.path.join(_BASE_DIR, "templates")
+    LOG_DIR      = os.path.join(_BASE_DIR, "logs")
+    LOG_FILE     = os.path.join(LOG_DIR, "jira_bot.log")
+    UPLOAD_DIR   = os.path.join(_BASE_DIR, "uploads")
+
+    # 启动时自动创建必要目录
+    os.makedirs(REPORTS_DIR,  exist_ok=True)
     os.makedirs(TEMPLATE_DIR, exist_ok=True)
-    os.makedirs(LOG_DIR, exist_ok=True)
+    os.makedirs(LOG_DIR,      exist_ok=True)
+    os.makedirs(UPLOAD_DIR,   exist_ok=True)
 
-    # ── 模型配置 ──────────────────────────────
-    MODEL_API_BASE = os.getenv("MODEL_API_BASE")
-    MODEL_API_KEY = os.getenv("MODEL_API_KEY")
-    MODEL_NAME = os.getenv("MODEL_NAME")
-    AI_TEMPERATURE = float(os.getenv("AI_TEMPERATURE", "0.5"))
 
-    # ── 上传目录 ──────────────────────────────
-    UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
+class ModelConfig:
+    """LLM 模型配置"""
+    API_BASE    = os.getenv("MODEL_API_BASE")
+    API_KEY     = os.getenv("MODEL_API_KEY")
+    NAME        = os.getenv("MODEL_NAME")
+    TEMPERATURE = float(os.getenv("AI_TEMPERATURE", "0.5"))
 
-    # ── 项目配置 ──────────────────────────────
-    PROJECTS_CONFIG = os.getenv("PROJECTS", "").strip()
-    TARGET_PROJECTS = None
-    if PROJECTS_CONFIG and PROJECTS_CONFIG.upper() != "ALL":
-        # 同时支持半角 "," 和全角 "，"（避免 .env 误用全角逗号导致整个项目被吞）
-        TARGET_PROJECTS = [
+
+class QueryConfig:
+    """查询分页限制与并发配置"""
+    MAX_TASKS_PER_TOOL    = int(os.getenv("MAX_TASKS_PER_TOOL",    "50"))
+    JQL_PAGE_SIZE         = int(os.getenv("JQL_PAGE_SIZE",        "100"))
+    ISSUE_FETCH_LIMIT     = int(os.getenv("ISSUE_FETCH_LIMIT",    "5000"))
+    REPORT_PARALLEL_WORKERS = int(os.getenv("REPORT_PARALLEL_WORKERS", "5"))
+
+
+class RiskConfig:
+    """风险评分阈值（可通过环境变量调参）"""
+    PROGRESS_LOW  = int(os.getenv("RISK_PROGRESS_LOW",  "30"))
+    PROGRESS_MED  = int(os.getenv("RISK_PROGRESS_MED",  "50"))
+    PROGRESS_HIGH = int(os.getenv("RISK_PROGRESS_HIGH", "70"))
+
+    OVERDUE_HIGH  = int(os.getenv("RISK_OVERDUE_HIGH", "5"))
+    OVERDUE_LOW   = int(os.getenv("RISK_OVERDUE_LOW",  "1"))
+
+    HIGH_PRIORITY_HIGH = int(os.getenv("RISK_HIGH_PRIORITY_HIGH", "10"))
+    HIGH_PRIORITY_LOW  = int(os.getenv("RISK_HIGH_PRIORITY_LOW",  "5"))
+
+    BLOCKED_HIGH = int(os.getenv("RISK_BLOCKED_HIGH", "3"))
+    BLOCKED_LOW  = int(os.getenv("RISK_BLOCKED_LOW",  "1"))
+
+    SCORE_HIGH = int(os.getenv("RISK_SCORE_HIGH", "60"))
+    SCORE_MED  = int(os.getenv("RISK_SCORE_MED",  "30"))
+
+
+class ReportConfig:
+    """报告清理策略"""
+    MAX_AGE_DAYS = int(os.getenv("REPORT_MAX_AGE_DAYS", "30"))
+
+
+class ProjectConfig:
+    """目标项目配置"""
+    _raw = os.getenv("PROJECTS", "").strip()
+    TARGET = None
+    if _raw and _raw.upper() != "ALL":
+        TARGET = [
             p.strip().upper()
-            for p in re.split(r"[,，]\s*", PROJECTS_CONFIG)
+            for p in re.split(r"[,，]\s*", _raw)
             if p.strip()
         ]
 
-    # ── 自定义字段ID ──────────────────────────
-    TARGET_START_FIELD = os.getenv("TARGET_START_FIELD", "customfield_12914")
-    TARGET_END_FIELD = os.getenv("TARGET_END_FIELD", "customfield_12915")
-    EPIC_LINK_FIELD_ID = os.getenv("EPIC_LINK_FIELD_ID")
+    @classmethod
+    def build_jql(cls, base_jql: str) -> str:
+        """根据目标项目过滤 JQL"""
+        if cls.TARGET:
+            project_filter = "project IN (" + ",".join(f'"{k}"' for k in cls.TARGET) + ")"
+            return f"{base_jql} AND {project_filter}"
+        return base_jql
 
-    # ── 查询限制 ──────────────────────────────
-    MAX_TASKS_PER_TOOL = int(os.getenv("MAX_TASKS_PER_TOOL", "50"))
-    JQL_PAGE_SIZE = int(os.getenv("JQL_PAGE_SIZE", "100"))
 
-    # ── 风险评分配置（可调）──────────────────
-    RISK_PROGRESS_LOW = int(os.getenv("RISK_PROGRESS_LOW", "30"))     # 低于此值判定严重滞后
-    RISK_PROGRESS_MED = int(os.getenv("RISK_PROGRESS_MED", "50"))     # 低于此值判定滞后
-    RISK_PROGRESS_HIGH = int(os.getenv("RISK_PROGRESS_HIGH", "70"))   # 低于此值判定偏慢
+# ── 统一入口（向后兼容）───────────────────────────────────────
 
-    RISK_OVERDUE_HIGH = int(os.getenv("RISK_OVERDUE_HIGH", "5"))      # 超期任务≥此值→较多
-    RISK_OVERDUE_LOW = int(os.getenv("RISK_OVERDUE_LOW", "1"))        # 超期任务≥此值→存在
+class Config:
+    """全局配置入口 — 委托给子配置类，保持旧属性名兼容"""
 
-    RISK_HIGH_PRIORITY_HIGH = int(os.getenv("RISK_HIGH_PRIORITY_HIGH", "10"))
-    RISK_HIGH_PRIORITY_LOW = int(os.getenv("RISK_HIGH_PRIORITY_LOW", "5"))
+    # ── Jira ──
+    JIRA_SERVER         = JiraConfig.SERVER
+    JIRA_USER           = JiraConfig.USER
+    JIRA_TOKEN          = JiraConfig.TOKEN
+    TARGET_START_FIELD  = JiraConfig.TARGET_START_FIELD
+    TARGET_END_FIELD    = JiraConfig.TARGET_END_FIELD
+    EPIC_LINK_FIELD_ID  = JiraConfig.EPIC_LINK_FIELD_ID
 
-    RISK_BLOCKED_HIGH = int(os.getenv("RISK_BLOCKED_HIGH", "3"))
-    RISK_BLOCKED_LOW = int(os.getenv("RISK_BLOCKED_LOW", "1"))
+    # ── 目录 ──
+    BASE_DIR     = PathConfig.BASE_DIR
+    REPORTS_DIR  = PathConfig.REPORTS_DIR
+    TEMPLATE_DIR = PathConfig.TEMPLATE_DIR
+    LOG_DIR      = PathConfig.LOG_DIR
+    LOG_FILE     = PathConfig.LOG_FILE
+    UPLOAD_DIR   = PathConfig.UPLOAD_DIR
 
-    RISK_SCORE_HIGH = int(os.getenv("RISK_SCORE_HIGH", "60"))         # ≥此值→高风险
-    RISK_SCORE_MED = int(os.getenv("RISK_SCORE_MED", "30"))           # ≥此值→中风险
+    # ── 模型 ──
+    MODEL_API_BASE = ModelConfig.API_BASE
+    MODEL_API_KEY  = ModelConfig.API_KEY
+    MODEL_NAME     = ModelConfig.NAME
+    AI_TEMPERATURE = ModelConfig.TEMPERATURE
 
-    # ── 报告清理策略 ──────────────────────────
-    REPORT_MAX_AGE_DAYS = int(os.getenv("REPORT_MAX_AGE_DAYS", "30"))  # 报告保留天数
+    # ── 查询 ──
+    MAX_TASKS_PER_TOOL      = QueryConfig.MAX_TASKS_PER_TOOL
+    JQL_PAGE_SIZE           = QueryConfig.JQL_PAGE_SIZE
+    ISSUE_FETCH_LIMIT       = QueryConfig.ISSUE_FETCH_LIMIT
+    REPORT_PARALLEL_WORKERS = QueryConfig.REPORT_PARALLEL_WORKERS
+
+    # ── 风险评分 ──
+    RISK_PROGRESS_LOW       = RiskConfig.PROGRESS_LOW
+    RISK_PROGRESS_MED       = RiskConfig.PROGRESS_MED
+    RISK_PROGRESS_HIGH      = RiskConfig.PROGRESS_HIGH
+    RISK_OVERDUE_HIGH       = RiskConfig.OVERDUE_HIGH
+    RISK_OVERDUE_LOW        = RiskConfig.OVERDUE_LOW
+    RISK_HIGH_PRIORITY_HIGH = RiskConfig.HIGH_PRIORITY_HIGH
+    RISK_HIGH_PRIORITY_LOW  = RiskConfig.HIGH_PRIORITY_LOW
+    RISK_BLOCKED_HIGH       = RiskConfig.BLOCKED_HIGH
+    RISK_BLOCKED_LOW        = RiskConfig.BLOCKED_LOW
+    RISK_SCORE_HIGH         = RiskConfig.SCORE_HIGH
+    RISK_SCORE_MED          = RiskConfig.SCORE_MED
+
+    # ── 报告 ──
+    REPORT_MAX_AGE_DAYS = ReportConfig.MAX_AGE_DAYS
+
+    # ── 项目 ──
+    TARGET_PROJECTS = ProjectConfig.TARGET
+
+    # ── 类方法（保持兼容）──────────────────────────
 
     @classmethod
     def get_build_jql(cls, base_jql: str) -> str:
-        """根据配置的项目添加过滤"""
-        if cls.TARGET_PROJECTS:
-            # 给 KEY 加引号，防止含特殊字符的项目破 JQL
-            project_filter = "project IN (" + ",".join(f'"{k}"' for k in cls.TARGET_PROJECTS) + ")"
+        # 使用 Config.TARGET_PROJECTS 而非 ProjectConfig.TARGET，
+        # 这样测试中 monkeypatch 可以覆盖
+        targets = cls.TARGET_PROJECTS
+        if targets:
+            project_filter = "project IN (" + ",".join(f'"{k}"' for k in targets) + ")"
+            # 将 project filter 插入到 ORDER BY 之前（ORDER BY 必须最后）
+            if " ORDER BY " in base_jql.upper():
+                parts = base_jql.split(" ORDER BY ", 1)
+                return f"{parts[0]} AND {project_filter} ORDER BY {parts[1]}"
             return f"{base_jql} AND {project_filter}"
         return base_jql
 
     @classmethod
     def cleanup_old_reports(cls) -> int:
         """清理超过 REPORT_MAX_AGE_DAYS 天的旧报告文件，返回删除数量"""
-        import glob  # 仅在调用时引入，避免模块导入期加载
+        import glob
         cutoff = datetime.now() - timedelta(days=cls.REPORT_MAX_AGE_DAYS)
         deleted = 0
         pattern = os.path.join(cls.REPORTS_DIR, "*.html")

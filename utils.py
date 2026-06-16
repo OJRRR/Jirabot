@@ -1,9 +1,24 @@
 """公共工具模块 - 日志、分页查询、输入校验"""
 import logging
 import re
+import sys
 import time
 from functools import wraps
 from logging.handlers import RotatingFileHandler
+
+# ── Windows 控制台 UTF-8（避免 emoji 触发 GBK UnicodeEncodeError）──
+def configure_console_encoding():
+    """尽量把 stdout/stderr 设为 UTF-8，Windows 终端默认 GBK 会炸 emoji。"""
+    if sys.platform != "win32":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
 
 # ── 日志配置 ─────────────────────────────────────────────
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s"

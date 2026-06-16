@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PM灏忓府鎵?/title>
+    <title>PM小帮手</title>
     <style>
         :root {
             --jira-blue: #0052CC;
@@ -213,6 +213,13 @@
         }
         .send-btn:hover { background: var(--jira-blue-hover); }
         .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .stop-btn {
+            background: #DE350B; color: #fff; border: none;
+            border-radius: 3px; padding: 6px 16px; font-size: 14px;
+            font-weight: 500; cursor: pointer; transition: background 0.15s;
+            white-space: nowrap; height: 34px; display: none;
+        }
+        .stop-btn:hover { background: #BF2600; }
 
         .hint-row { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; padding-left: 4px; }
         .hint-text { font-size: 12px; color: var(--jira-text-muted); }
@@ -275,30 +282,30 @@
             <path d="M16 6L8 20h6l2 4 2-4h6L16 6z" fill="white" opacity="0.9"/>
             <path d="M16 10l-4 8h3l1 2 1-2h3l-4-8z" fill="white"/>
         </svg>
-        <span>PM灏忓府鎵?/span>
+        <span>PM小帮手</span>
     </div>
     <div class="header-actions">
         <span class="badge" id="fileBadge"></span>
-        <button class="btn-icon" onclick="resetChat()" title="鏂板璇?>+</button>
+        <button class="btn-icon" onclick="resetChat()" title="新建对话">+</button>
     </div>
 </header>
 
 <div class="app-container">
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-section">
-            <div class="sidebar-title">蹇€熸搷浣?/div>
-            <a class="sidebar-item" onclick="quickChat('鎴戠殑浠诲姟')"><span class="emoji">馃搵</span> 鎴戠殑浠诲姟</a>
-            <a class="sidebar-item" onclick="quickChat('鐢熸垚椤圭洰闆嗘姤鍛?)"><span class="emoji">馃搳</span> 鐢熸垚椤圭洰闆嗘姤鍛?/a>
-            <a class="sidebar-item" onclick="quickChat('椋庨櫓鎬荤粨')"><span class="emoji">鈿狅笍</span> 椋庨櫓鎬荤粨</a>
-            <a class="sidebar-item" onclick="quickChat('鎼滅储 KO 椤圭洰涓姸鎬佷负 In Progress 鐨勪换鍔?)"><span class="emoji">馃攳</span> 鎼滅储浠诲姟</a>
+            <div class="sidebar-title">快速操作</div>
+            <a class="sidebar-item" onclick="quickChat('我的任务')"><span class="emoji">📋</span> 我的任务</a>
+            <a class="sidebar-item" onclick="quickChat('生成项目集报告')"><span class="emoji">📊</span> 生成项目集报告</a>
+            <a class="sidebar-item" onclick="quickChat('风险总结')"><span class="emoji">⚠️</span> 风险总结</a>
+            <a class="sidebar-item" onclick="quickChat('搜索 KO 项目中状态为 In Progress 的任务')"><span class="emoji">🔍</span> 搜索任务</a>
         </div>
         <div class="sidebar-section">
             <div class="sidebar-title">
-                <span>蹇嵎鍛戒护</span>
-                <button class="edit-btn" onclick="toggleEditCommands()" id="editCmdBtn">缂栬緫</button>
+                <span>快捷命令</span>
+                <button class="edit-btn" onclick="toggleEditCommands()" id="editCmdBtn">编辑</button>
             </div>
             <div id="customCommands"></div>
-            <button class="add-command-btn" onclick="addCustomCommand()" id="addCmdBtn">+ 娣诲姞蹇嵎鍛戒护</button>
+            <button class="add-command-btn" onclick="addCustomCommand()" id="addCmdBtn">+ 添加快捷命令</button>
         </div>
     </aside>
 
@@ -309,21 +316,33 @@
             <div class="typing-dots"><span></span><span></span><span></span></div>
         </div>
         <div class="input-area">
-            <div class="input-wrapper">
+            <div class="input-wrapper"
+                ondragover="handleDragOver(event)"
+                ondragleave="handleDragLeave(event)"
+                ondrop="handleDropOnInput(event)">
                 <textarea id="input" rows="1"
-                    placeholder="杈撳叆浣犵殑闇€姹傦紝鎴栫偣鍑火煋庝笂浼燛xcel/鍥剧墖..."
+                    placeholder="输入需求，或 Ctrl+V 粘贴图片 / 拖拽上传..."
                     onkeydown="handleKey(event)"
-                    oninput="autoResize(this)"></textarea>
+                    oninput="autoResize(this)"
+                    onpaste="handlePaste(event)"></textarea>
                 <div class="input-actions">
-                    <button class="upload-btn" onclick="openUploadModal()" title="涓婁紶鏂囦欢 (Excel/鍥剧墖)">馃搸</button>
-                    <button class="send-btn" id="sendBtn" onclick="sendMessage()">鍙戦€?/button>
+                    <button class="upload-btn" onclick="openUploadModal()" title="上传文件 (Excel/图片)">📎</button>
+                    <button class="stop-btn" id="stopBtn" onclick="stopStream()" title="停止生成">■ 停止</button>
+                    <button class="send-btn" id="sendBtn" onclick="sendMessage()">发送</button>
                 </div>
             </div>
+            <!-- Paste preview bar -->
+            <div id="pastePreview" style="display:none; align-items:center; gap:8px; padding:6px 8px; background:#F0F5FF; border-radius:3px; margin-top:6px;">
+                <img id="pasteThumb" src="" style="max-height:48px; max-width:80px; border-radius:3px; border:1px solid var(--jira-border);">
+                <span id="pasteName" style="font-size:13px; color:var(--jira-text); flex:1;"></span>
+                <span style="font-size:11px; color:var(--jira-blue);">Ctrl+V 粘贴</span>
+                <span class="remove-file" onclick="clearPastePreview()">×</span>
+            </div>
             <div class="hint-row">
-                <span class="hint-text">Enter 鍙戦€?路 Shift+Enter 鎹㈣</span>
+                <span class="hint-text">Enter 发送 · Shift+Enter 换行</span>
                 <span class="file-badge" id="uploadBadge" style="display:none">
-                    馃搸 <span id="uploadName"></span>
-                    <span class="remove-file" onclick="clearUpload()">脳</span>
+                    📎 <span id="uploadName"></span>
+                    <span class="remove-file" onclick="clearUpload()">×</span>
                 </span>
             </div>
         </div>
@@ -333,39 +352,40 @@
 <!-- Upload Modal -->
 <div class="modal-overlay" id="uploadModal">
     <div class="modal">
-        <h3>馃搸 涓婁紶鏂囦欢</h3>
+        <h3>📎 上传文件</h3>
         <div class="dropzone" id="dropzone"
             onclick="document.getElementById('fileInput').click()"
             ondragover="event.preventDefault(); this.classList.add('dragover')"
             ondragleave="this.classList.remove('dragover')"
             ondrop="handleDrop(event)">
-            <div class="dropzone-icon">馃搫</div>
-            <div class="dropzone-text">鐐瑰嚮鎴栨嫋鎷芥枃浠跺埌姝ゅ</div>
-            <div class="dropzone-hint">鏀寔 Excel (.xlsx) 鍜屽浘鐗?(.png/.jpg)</div>
+            <div class="dropzone-icon">📁</div>
+            <div class="dropzone-text">点击或拖拽文件到此处</div>
+            <div class="dropzone-hint">支持 Excel (.xlsx) 和图片 (.png/.jpg)</div>
         </div>
         <input type="file" id="fileInput" accept=".xlsx,.xls,.png,.jpg,.jpeg,.gif" style="display:none" onchange="handleFileSelect(event)">
         <div id="uploadPreview" style="display:none; margin-bottom:12px;">
-            <p style="font-size:14px;">鉁?宸查€夋嫨: <span id="selectedFileName"></span></p>
+            <p style="font-size:14px;">✅ 已选择: <span id="selectedFileName"></span></p>
         </div>
         <div class="btn-row">
-            <button class="btn btn-secondary" onclick="closeUploadModal()">鍙栨秷</button>
-            <button class="btn btn-primary" onclick="confirmUpload()">涓婁紶骞跺鐞?/button>
+            <button class="btn btn-secondary" onclick="closeUploadModal()">取消</button>
+            <button class="btn btn-primary" onclick="confirmUpload()">上传并处理</button>
         </div>
     </div>
 </div>
 
 <script>
-    // 鈹€鈹€ State 鈹€鈹€
+    // ── State ──
     let isSending = false;
     let pendingFile = null;     // { path, name, type }
     let isEditMode = false;
+    let abortController = null; // 用于中断 SSE 流
 
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('input');
     const sendBtn = document.getElementById('sendBtn');
     const thinkingEl = document.getElementById('thinking');
 
-    // 鈹€鈹€ Autosize 鈹€鈹€
+    // ── Autosize ──
     function autoResize(el) {
         el.style.height = 'auto';
         el.style.height = Math.min(el.scrollHeight, 120) + 'px';
@@ -378,7 +398,121 @@
         }
     }
 
-    // 鈹€鈹€ Markdown 鈹€鈹€
+    // ── Paste image ──
+    async function handlePaste(e) {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        for (const item of items) {
+            if (item.type.startsWith('image/')) {
+                e.preventDefault();
+                const blob = item.getAsFile();
+                if (!blob) continue;
+
+                // Show preview immediately
+                const reader = new FileReader();
+                reader.onload = function(ev) {
+                    showPastePreview(ev.target.result, blob);
+                };
+                reader.readAsDataURL(blob);
+                return;
+            }
+        }
+    }
+
+    function showPastePreview(dataUrl, blob) {
+        const preview = document.getElementById('pastePreview');
+        const thumb = document.getElementById('pasteThumb');
+        const name = document.getElementById('pasteName');
+        thumb.src = dataUrl;
+        name.textContent = `截图 (${(blob.size / 1024).toFixed(1)} KB)`;
+        preview.style.display = 'flex';
+        window._pasteBlob = blob;
+        inputEl.focus();
+    }
+
+    function clearPastePreview() {
+        document.getElementById('pastePreview').style.display = 'none';
+        document.getElementById('pasteThumb').src = '';
+        window._pasteBlob = null;
+    }
+
+    async function uploadPastedImage() {
+        const blob = window._pasteBlob;
+        if (!blob) return null;
+
+        const formData = new FormData();
+        const ext = blob.type === 'image/png' ? 'png' : 'jpg';
+        formData.append('file', blob, `paste_${Date.now()}.${ext}`);
+
+        try {
+            const resp = await fetch('/api/upload', { method: 'POST', body: formData });
+            const data = await resp.json();
+            if (data.error) { alert(data.error); return null; }
+            return { path: data.file_path, name: data.file_name, type: data.file_type };
+        } catch (err) {
+            alert('粘贴图片上传失败: ' + err.message);
+            return null;
+        }
+    }
+
+    // ── Drag & drop on input area ──
+    function handleDragOver(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.style.borderColor = 'var(--jira-blue)';
+        e.currentTarget.style.background = '#F0F5FF';
+    }
+
+    function handleDragLeave(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.style.borderColor = '';
+        e.currentTarget.style.background = '';
+    }
+
+    async function handleDropOnInput(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const wrapper = e.currentTarget;
+        wrapper.style.borderColor = '';
+        wrapper.style.background = '';
+
+        const file = e.dataTransfer.files[0];
+        if (!file) return;
+
+        const ext = file.name.split('.').pop().toLowerCase();
+        if (!['xlsx','xls','png','jpg','jpeg','gif'].includes(ext)) {
+            alert('不支持的文件格式，请上传 Excel 或图片文件');
+            return;
+        }
+
+        // Excel 直接走弹窗确认
+        if (ext === 'xlsx' || ext === 'xls') {
+            document.getElementById('selectedFileName').textContent = file.name;
+            document.getElementById('uploadPreview').style.display = 'block';
+            window._pendingUploadFile = file;
+            openUploadModal();
+            return;
+        }
+
+        // 图片直接上传并显示 badge
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const resp = await fetch('/api/upload', { method: 'POST', body: formData });
+            const data = await resp.json();
+            if (data.error) { alert(data.error); return; }
+            pendingFile = { path: data.file_path, name: data.file_name, type: data.file_type };
+            document.getElementById('uploadName').textContent = data.file_name;
+            document.getElementById('uploadBadge').style.display = 'inline-flex';
+            document.getElementById('fileBadge').textContent = `📎 ${data.file_name}`;
+        } catch (err) {
+            alert('拖拽上传失败: ' + err.message);
+        }
+    }
+
+    // ── Markdown ──
     function renderMarkdown(text) {
         if (!text) return '<p></p>';
         let html = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -399,7 +533,7 @@
         setTimeout(() => messagesEl.scrollTop = messagesEl.scrollHeight, 50);
     }
 
-    // 鈹€鈹€ Add message 鈹€鈹€
+    // ── Add message ──
     function addMessage(role, content) {
         const div = document.createElement('div');
         div.className = `message ${role}`;
@@ -408,46 +542,48 @@
             div.innerHTML = `
                 <div class="message-avatar ai">AI</div>
                 <div class="message-bubble">
-                    <div class="message-label">PM灏忓府鎵?/div>
+                    <div class="message-label">PM小帮手</div>
                     ${renderMarkdown(content)}
                     <div class="message-time">${time}</div>
                 </div>`;
         } else {
             div.innerHTML = `
                 <div class="message-bubble">
-                    <div class="message-label">浣?/div>
+                    <div class="message-label">你</div>
                     <p>${content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p>
                     <div class="message-time">${time}</div>
                 </div>
-                <div class="message-avatar user">浣?/div>`;
+                <div class="message-avatar user">你</div>`;
         }
         messagesEl.appendChild(div);
         scrollToBottom();
         return div;
     }
 
-    // 鈹€鈹€ SSE 娴佸紡鍥炲 鈹€鈹€
+    // ── SSE streaming reply ──
     function addStreamingMessage() {
         const div = document.createElement('div');
         div.className = 'message ai';
         const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+        const contentId = 'sc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+        const toolsId = 'st_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
         div.innerHTML = `
             <div class="message-avatar ai">AI</div>
-            <div class="message-bubble" id="streamBubble">
-                <div class="message-label">PM灏忓府鎵?/div>
-                <div id="streamTools" class="stream-tools" style="display:none;"></div>
-                <div id="streamContent"></div>
+            <div class="message-bubble">
+                <div class="message-label">PM小帮手</div>
+                <div id="${toolsId}" class="stream-tools" style="display:none;"></div>
+                <div id="${contentId}"></div>
                 <div class="message-time">${time}</div>
             </div>`;
         messagesEl.appendChild(div);
         scrollToBottom();
         return {
-            content: document.getElementById('streamContent'),
-            tools: document.getElementById('streamTools'),
+            content: document.getElementById(contentId),
+            tools: document.getElementById(toolsId),
         };
     }
 
-    // 鈹€鈹€ Tool trace 鈹€鈹€
+    // ── Tool trace ──
     function appendToolTrace(panel, type, name, payload) {
         if (!panel) return;
         panel.style.display = 'block';
@@ -458,18 +594,18 @@
             const argsStr = (() => {
                 try {
                     const s = JSON.stringify(payload || {});
-                    return s.length > 120 ? s.slice(0, 120) + '鈥? : s;
+                    return s.length > 120 ? s.slice(0, 120) + '…' : s;
                 } catch (e) { return ''; }
             })();
-            item.innerHTML = `<span class="tool-icon">馃敡</span> 璋冪敤 <code>${name}</code> <span class="tool-args">${argsStr}</span>`;
+            item.innerHTML = `<span class="tool-icon">🔧</span> 调用 <code>${name}</code> <span class="tool-args">${argsStr}</span>`;
         } else if (type === 'tool_result') {
             const ok = payload && payload.ok !== false;
             const content = (payload && payload.content) || '';
-            const preview = content.length > 200 ? content.slice(0, 200) + '鈥? : content;
-            item.innerHTML = `<span class="tool-icon">${ok ? '鉁? : '鈿狅笍'}</span> <code>${name}</code> 鈫?<span class="tool-result">${preview}</span>`;
+            const preview = content.length > 200 ? content.slice(0, 200) + '…' : content;
+            item.innerHTML = `<span class="tool-icon">${ok ? '✅' : '⚠️'}</span> <code>${name}</code> → <span class="tool-result">${preview}</span>`;
         } else if (type === 'thinking') {
             item.className = 'tool-item tool-thinking';
-            item.innerHTML = `<span class="tool-icon">馃挱</span> ${payload || ''}`;
+            item.innerHTML = `<span class="tool-icon">💭</span> ${payload || ''}`;
         } else {
             return;
         }
@@ -477,28 +613,43 @@
         scrollToBottom();
     }
 
-    // 鈹€鈹€ Send message (SSE with fallback) 鈹€鈹€
+    // ── Send message (SSE with fallback) ──
     async function sendMessage() {
         const text = inputEl.value.trim();
-        if ((!text && !pendingFile) || isSending) return;
+        const hasPaste = !!window._pasteBlob;
+        if ((!text && !pendingFile && !hasPaste) || isSending) return;
 
         inputEl.value = '';
         autoResize(inputEl);
 
-        // 鏄剧ず鐢ㄦ埛娑堟伅
+        // Upload pasted image if present (upload happens in send flow, not on paste)
+        if (hasPaste && !pendingFile) {
+            const result = await uploadPastedImage();
+            if (result) {
+                pendingFile = result;
+                document.getElementById('uploadName').textContent = result.name;
+                document.getElementById('uploadBadge').style.display = 'inline-flex';
+            }
+            clearPastePreview();
+        }
+
+        // Show user message
         let userMsg = text;
-        if (pendingFile) userMsg = `[馃搸 ${pendingFile.name}] ${text || '璇峰鐞嗘鏂囦欢'}`;
+        if (pendingFile) userMsg = `[📎 ${pendingFile.name}] ${text || '请处理此文件'}`;
         addMessage('user', userMsg);
 
         thinkingEl.classList.add('active');
         sendBtn.disabled = true;
+        sendBtn.style.display = 'none';
+        document.getElementById('stopBtn').style.display = 'inline-flex';
         isSending = true;
 
         const { content: contentEl, tools: toolsPanel } = addStreamingMessage();
         let accumulated = '';
 
+        abortController = new AbortController();
+
         try {
-            // 閫夋嫨 API 绔偣
             let url = pendingFile ? '/api/chat_with_file/stream' : '/api/chat/stream';
             if (!text && pendingFile) url = '/api/chat_with_file/stream';
 
@@ -511,11 +662,13 @@
             const resp = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
+                body: JSON.stringify(body),
+                signal: abortController.signal
             });
 
             if (!resp.ok) {
-                throw new Error(`HTTP ${resp.status}`);
+                const errData = await resp.json().catch(() => ({}));
+                throw new Error(errData.error || `HTTP ${resp.status}`);
             }
 
             const reader = resp.body.getReader();
@@ -554,48 +707,63 @@
                 }
             }
         } catch (err) {
-            // SSE 澶辫触 鈫?鍥為€€鍒伴潪娴佸紡
-            console.warn('SSE 澶辫触锛屽洖閫€鍒伴潪娴佸紡:', err);
-            try {
-                const fallbackUrl = pendingFile ? '/api/chat_with_file' : '/api/chat';
-                const body = pendingFile ? {
-                    message: text,
-                    file_path: pendingFile.path,
-                    file_type: pendingFile.type
-                } : { message: text };
+            if (err.name === 'AbortError') {
+                // 用户主动停止，不做 fallback
+                contentEl.innerHTML += '<p style="color:var(--jira-text-muted);font-style:italic;margin-top:8px;">⏹️ 已停止生成</p>';
+            } else {
+                // SSE failed → fallback to non-streaming
+                console.warn('SSE failed, falling back to non-streaming:', err);
+                try {
+                    const fallbackUrl = pendingFile ? '/api/chat_with_file' : '/api/chat';
+                    const body = pendingFile ? {
+                        message: text,
+                        file_path: pendingFile.path,
+                        file_type: pendingFile.type
+                    } : { message: text };
 
-                const resp = await fetch(fallbackUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body)
-                });
-                const data = await resp.json();
-                if (data.error) {
-                    contentEl.innerHTML = `<p>鉂?${data.error}</p>`;
-                } else {
-                    contentEl.innerHTML = renderMarkdown(data.reply);
+                    const resp = await fetch(fallbackUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
+                    const data = await resp.json();
+                    if (data.error) {
+                        contentEl.innerHTML = `<p>❌ ${data.error}</p>`;
+                    } else {
+                        contentEl.innerHTML = renderMarkdown(data.reply);
+                    }
+                } catch (fallbackErr) {
+                    contentEl.innerHTML = `<p>❌ 网络错误: ${fallbackErr.message}</p>`;
                 }
-            } catch (fallbackErr) {
-                contentEl.innerHTML = `<p>鉂?缃戠粶閿欒: ${fallbackErr.message}</p>`;
             }
         }
 
-        // 娓呯悊
+        // Cleanup
         clearUpload();
         thinkingEl.classList.remove('active');
         sendBtn.disabled = false;
+        sendBtn.style.display = '';
+        document.getElementById('stopBtn').style.display = 'none';
         isSending = false;
+        abortController = null;
         inputEl.focus();
     }
 
-    // 鈹€鈹€ Quick chat 鈹€鈹€
+    function stopStream() {
+        if (abortController) {
+            abortController.abort();
+            abortController = null;
+        }
+    }
+
+    // ── Quick chat ──
     function quickChat(text) {
         inputEl.value = text;
         autoResize(inputEl);
         sendMessage();
     }
 
-    // 鈹€鈹€ Upload modal 鈹€鈹€
+    // ── Upload modal ──
     function openUploadModal() {
         document.getElementById('uploadModal').classList.add('active');
         document.getElementById('uploadPreview').style.display = 'none';
@@ -619,7 +787,7 @@
     function previewFile(file) {
         const ext = file.name.split('.').pop().toLowerCase();
         if (!['xlsx','xls','png','jpg','jpeg','gif'].includes(ext)) {
-            alert('涓嶆敮鎸佺殑鏂囦欢鏍煎紡锛岃涓婁紶 Excel 鎴栧浘鐗囨枃浠?);
+            alert('不支持的文件格式，请上传 Excel 或图片文件');
             return;
         }
         document.getElementById('selectedFileName').textContent = file.name;
@@ -642,11 +810,11 @@
             pendingFile = { path: data.file_path, name: data.file_name, type: data.file_type };
             document.getElementById('uploadName').textContent = data.file_name;
             document.getElementById('uploadBadge').style.display = 'inline-flex';
-            document.getElementById('fileBadge').textContent = `馃搸 ${data.file_name}`;
+            document.getElementById('fileBadge').textContent = `📎 ${data.file_name}`;
             closeUploadModal();
             inputEl.focus();
         } catch (err) {
-            alert('涓婁紶澶辫触: ' + err.message);
+            alert('上传失败: ' + err.message);
         }
     }
 
@@ -655,20 +823,23 @@
         document.getElementById('uploadBadge').style.display = 'none';
         document.getElementById('fileBadge').textContent = '';
         window._pendingUploadFile = null;
+        clearPastePreview();
     }
 
-    // 鈹€鈹€ Quick commands (localStorage) 鈹€鈹€
+    // ── Quick commands (localStorage) ──
     function loadCommands() {
         const cmds = JSON.parse(localStorage.getItem('jira_quick_cmds') || '[]');
         const container = document.getElementById('customCommands');
         container.innerHTML = '';
+        if (cmds.length === 0 && !isEditMode) {
+            container.innerHTML = '<p style="font-size:12px;color:var(--jira-text-muted);padding:4px 8px;">暂无自定义命令</p>';
+        }
         cmds.forEach((c, i) => {
             const a = document.createElement('a');
             a.className = 'sidebar-item';
-            a.innerHTML = `<span class="emoji">${c.emoji || '鈿?}</span> ${c.label}`;
+            a.innerHTML = `<span class="emoji">${c.emoji || '📌'}</span> ${c.label}`;
             if (isEditMode) {
-                a.innerHTML += `<span class="del-btn" onclick="removeCommand(${i})">脳</span>`;
-                a.onclick = () => {};
+                a.innerHTML += `<span class="del-btn" onclick="event.stopPropagation();removeCommand(${i})">×</span>`;
             } else {
                 a.onclick = () => quickChat(c.text);
             }
@@ -683,36 +854,17 @@
 
     function toggleEditCommands() {
         isEditMode = !isEditMode;
-        document.getElementById('editCmdBtn').textContent = isEditMode ? '瀹屾垚' : '缂栬緫';
-        document.getElementById('addCmdBtn').style.display = isEditMode ? 'block' : 'block';
-        // 閲嶆柊鍔犺浇鍛戒护
-        const cmds = JSON.parse(localStorage.getItem('jira_quick_cmds') || '[]');
-        const container = document.getElementById('customCommands');
-        container.innerHTML = '';
-        if (cmds.length === 0 && !isEditMode) {
-            container.innerHTML = '<p style="font-size:12px;color:var(--jira-text-muted);padding:4px 8px;">鏆傛棤鑷畾涔夊懡浠?/p>';
-        }
-        cmds.forEach((c, i) => {
-            const a = document.createElement('a');
-            a.className = 'sidebar-item';
-            a.innerHTML = `<span class="emoji">${c.emoji || '鈿?}</span> ${c.label}`;
-            if (isEditMode) {
-                a.innerHTML += `<span class="del-btn" onclick="removeCommand(${i})">脳</span>`;
-                a.onclick = () => {};
-            } else {
-                a.onclick = () => quickChat(c.text);
-            }
-            container.appendChild(a);
-        });
+        document.getElementById('editCmdBtn').textContent = isEditMode ? '完成' : '编辑';
+        loadCommands();
     }
 
     function addCustomCommand() {
-        const label = prompt('杈撳叆鍛戒护鍚嶇О锛堝锛氭洿鏂癒O-29鏃ユ湡锛?');
+        const label = prompt('输入命令名称（如：更新KO-29日期）：');
         if (!label) return;
-        const text = prompt('杈撳叆鍛戒护鍐呭锛堝锛氭妸 KO-29 鐨勬棩鏈熸敼涓?6鏈?鏃ュ埌6鏈?5鏃ワ級:');
+        const text = prompt('输入命令内容（如：把 KO-29 的日期改为6月1日到6月5日）：');
         if (!text) return;
         const cmds = JSON.parse(localStorage.getItem('jira_quick_cmds') || '[]');
-        cmds.push({ label, text, emoji: '鈿? });
+        cmds.push({ label, text, emoji: '📌' });
         saveCommands(cmds);
     }
 
@@ -722,9 +874,9 @@
         saveCommands(cmds);
     }
 
-    // 鈹€鈹€ Reset 鈹€鈹€
+    // ── Reset ──
     async function resetChat() {
-        if (!confirm('纭畾瑕佹竻绌哄綋鍓嶅璇濆悧锛?)) return;
+        if (!confirm('确定要清空当前对话吗？')) return;
         await fetch('/api/reset', { method: 'POST' });
         messagesEl.innerHTML = '';
         clearUpload();
@@ -732,37 +884,37 @@
         inputEl.focus();
     }
 
-    // 鈹€鈹€ Welcome 鈹€鈹€
+    // ── Welcome ──
     function addWelcomeMessage() {
         const div = document.createElement('div');
         div.className = 'message ai';
         div.innerHTML = `
             <div class="message-avatar ai">AI</div>
             <div class="message-bubble">
-                <div class="message-label">PM灏忓府鎵?/div>
-                <p>馃憢 浣犲ソ锛佹垜鏄?<strong>PM灏忓府鎵?/strong>銆?/p>
-                <p>鏀寔浠ヤ笅鎿嶄綔锛?/p>
+                <div class="message-label">PM小帮手</div>
+                <p>👋 你好！我是 <strong>PM小帮手</strong>。</p>
+                <p>支持以下操作：</p>
                 <ul>
-                    <li><code>鎴戠殑浠诲姟</code> 鈥?鏌ョ湅浠诲姟</li>
-                    <li><code>鐢熸垚 KO 鎶ュ憡</code> 鈥?HTML 鎶ュ憡</li>
-                    <li>馃搸 <strong>涓婁紶 Excel</strong> 鈥?鎵归噺瀵煎叆浠诲姟</li>
-                    <li>馃搸 <strong>涓婁紶鍥剧墖</strong> 鈥?璇嗗埆琛ㄦ牸鍒涘缓浠诲姟</li>
-                    <li><code>鎵归噺鏇存柊鏃ユ湡</code> 鈥?缁存姢 Jira Plan</li>
+                    <li><code>我的任务</code> — 查看任务</li>
+                    <li><code>生成 KO 报告</code> — HTML 报告</li>
+                    <li>📎 <strong>上传 Excel</strong> — 批量导入任务</li>
+                    <li>📎 <strong>上传图片</strong> — 识别表格创建任务</li>
+                    <li><code>批量更新日期</code> — 维护 Jira Plan</li>
                 </ul>
-                <p>璇曡瘯宸︿晶蹇嵎鍛戒护锛屾垨鐩存帴鎵撳瓧闂垜锛?/p>
+                <p>试试左侧快捷命令，或直接打字问我！</p>
             </div>`;
         messagesEl.appendChild(div);
         scrollToBottom();
     }
 
-    // 首次使用自动预设常用快捷指令
-    if (!localStorage.getItem(\"jira_quick_cmds\")) {
+    // First time: preset default quick commands
+    if (!localStorage.getItem("jira_quick_cmds")) {
         const defaults = [
-            { label: \"我的任务\", text: \"查看我的任务\", emoji: \"📋\" },
-            { label: \"生成 KO 报告\", text: \"生成 KO 项目的报告\", emoji: \"📊\" },
-            { label: \"风险总结\", text: \"提取所有项目的风险项并总结\", emoji: \"⚠️\" },
-            { label: \"KO 依赖分析\", text: \"分析 KO 项目的任务依赖关系\", emoji: \"🔗\" },
-            { label: \"搜索高优先级任务\", text: \"搜索我的高优先级任务\", emoji: \"🔍\" },
+            { label: "我的任务", text: "查看我的任务", emoji: "📋" },
+            { label: "生成 KO 报告", text: "生成 KO 项目的报告", emoji: "📊" },
+            { label: "风险总结", text: "提取所有项目的风险项并总结", emoji: "⚠️" },
+            { label: "KO 依赖分析", text: "分析 KO 项目的任务依赖关系", emoji: "🔗" },
+            { label: "搜索高优先级任务", text: "搜索我的高优先级任务", emoji: "🔍" },
         ];
         localStorage.setItem('jira_quick_cmds', JSON.stringify(defaults));
     }

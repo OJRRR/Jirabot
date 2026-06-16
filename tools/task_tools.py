@@ -16,6 +16,76 @@ from .task_common import (
 _logger = logging.getLogger("jira_bot.task_tools")
 jira = LazyJira()
 
+# 创建元数据缓存（project_key:issue_type_name → JSON 字符串）
+_create_meta_cache: dict = {}
+
+def _resolve_fields_via_meta(additional_fields: dict, project_key: str) -> dict:
+    """通过项目元数据查找字段显示名 → customfield ID，不使用全局别名"""
+    if not additional_fields or not project_key:
+        return process_additional_fields(additional_fields)  # 没项目KEY时回退全局别名
+    processed = {}
+    try:
+        meta_str = _get_create_meta_cached(project_key)
+        meta = json.loads(meta_str)
+        if meta.get("success"):
+            # 建立显示名（小写）→ field_key 的映射
+            name_to_key = {}
+            for it in meta["data"]["issue_types"]:
+                for f in it.get("optional_fields", []) + it.get("required_fields", []):
+                    fname = f.get("name", "").lower().strip()
+                    fkey = f.get("key", "")
+                    if fname and fkey.startswith("customfield_"):
+                        name_to_key[fname] = fkey
+            # 用显示名匹配
+            for k, v in additional_fields.items():
+                norm = k.lower().strip()
+                if norm in name_to_key:
+                    processed[name_to_key[norm]] = v
+                elif k.startswith("customfield_"):
+                    processed[k] = v
+                # 不在元数据中的字段名 → 跳过
+    except Exception:
+        pass
+    # 元数据查找失败或没匹配到，回退全局别名
+    if not processed:
+        processed = process_additional_fields(additional_fields)
+    return processed
+
+
+def _get_create_meta_cached(project_key: str) -> str:
+    """内部：获取项目元数据（带缓存），供 update_issue 等工具查找字段 ID"""
+    cache_key = f"{project_key}:"
+    if cache_key in _create_meta_cache:
+        return _create_meta_cache[cache_key]
+    result = get_create_issue_metadata(project_key)
+    # 缓存结果（get_create_issue_metadata 内部也会缓存，但只缓存自己的调用）
+    _create_meta_cache[cache_key] = result
+    return result
+
+
+def _get_required_fields(project_key: str, issue_type: str) -> list:
+    """从缓存的元数据中提取指定项目+问题类型的必填字段名列表。
+
+    如果缓存中无数据，返回 None（表示需要先调用 get_create_issue_metadata）。
+    """
+    cache_key = f"{project_key}:{issue_type}"
+    raw = _create_meta_cache.get(cache_key)
+    if raw is None:
+        # 也尝试查不带 issue_type 的缓存
+        raw = _create_meta_cache.get(f"{project_key}:")
+    if raw is None:
+        return None
+
+    try:
+        meta = json.loads(raw)
+        data = meta.get("data", {})
+        for it in data.get("issue_types", []):
+            if it.get("name", "").lower() == issue_type.lower():
+                return [f["name"] for f in it.get("required_fields", [])]
+    except (json.JSONDecodeError, KeyError):
+        pass
+    return []
+
 
 # ── 查询工具 ──────────────────────────────────────────────
 
@@ -96,7 +166,7 @@ def search_issues(query: str = "", project: str = "", status: str = "",
         if status:
             jql_parts.append(f'status = "{status}"')
         if assignee:
-            if assignee.lower() == "currentUser()" or assignee.lower() == "me":
+            if assignee.lower() == "currentuser()" or assignee.lower() == "me":
                 jql_parts.append("assignee = currentUser()")
             else:
                 jql_parts.append(f'assignee = "{assignee}"')
@@ -138,9 +208,17 @@ def get_create_issue_metadata(project_key: str = "", issue_type_name: str = None
     """
     获取在指定项目中创建问题的元数据，包括可用的问题类型及其必填/可选字段。
     参数：project_key - 项目KEY，issue_type_name - 可选，按名称过滤问题类型
+    结果会被缓存，同一项目+类型的组合不会重复请求 Jira API。
     """
     try:
         key = validate_project_key(project_key)
+        cache_key = f"{key}:{issue_type_name or ''}"
+
+        # 命中缓存则直接返回
+        if cache_key in _create_meta_cache:
+            _logger.debug("命中创建元数据缓存: %s", cache_key)
+            return _create_meta_cache[cache_key]
+
         _logger.info("获取创建元数据: %s %s", key, issue_type_name if issue_type_name else "")
 
         meta_data = jira.get_issue_createmeta(key)
@@ -196,7 +274,9 @@ def get_create_issue_metadata(project_key: str = "", issue_type_name: str = None
                     )
             break
 
-        return json.dumps({"success": True, "data": result}, ensure_ascii=False, indent=2)
+        result = json.dumps({"success": True, "data": result}, ensure_ascii=False, indent=2)
+        _create_meta_cache[cache_key] = result
+        return result
     except Exception as e:
         _logger.error("获取创建元数据失败 %s: %s", project_key, e)
         return json.dumps({"error": f"获取创建元数据失败: {str(e)}"}, ensure_ascii=False)
@@ -246,23 +326,16 @@ def create_issue(project_key: str = "", summary: str = "", issue_type: str = "",
     except Exception as e:
         error_msg = str(e)
         _logger.error("创建失败: %s", error_msg)
-        missing_fields = []
-        if "required" in error_msg.lower():
-            patterns = [
-                re.compile(r"required field '?(\w+)'? is missing", re.IGNORECASE),
-                re.compile(r"'?(\w+(?:\s+\w+)*)'? is required", re.IGNORECASE),
-                re.compile(r"required field '?(\w+(?:\s+\w+)*)'?", re.IGNORECASE),
-            ]
-            for pattern in patterns:
-                match = pattern.search(error_msg)
-                if match:
-                    missing_fields.append(match.group(1))
-                    break
-        if missing_fields:
-            return (f"创建失败，缺少必填字段: {', '.join(missing_fields)}。\n"
-                    f"请先调用 get_create_issue_metadata('{project_key}', '{issue_type}') 工具查询该类型的必填字段及可选值列表，"
-                    f"然后将字段的值通过 additional_fields 参数传入。\n"
-                    f"原始错误: {error_msg}")
+
+        # 尝试从缓存的元数据中获取必填字段列表，给出更有用的提示
+        required_fields = _get_required_fields(key, issue_type)
+        if required_fields:
+            return (f"创建失败: {error_msg}\n\n"
+                    f"💡 该问题类型 ({issue_type}) 的必填字段为: {', '.join(required_fields)}。\n"
+                    f"请将这些字段的值通过 additional_fields 参数传入，格式如：\n"
+                    f'  additional_fields={{"字段名": "值", "另一个字段": "值"}}\n\n'
+                    f"如果字段名是自定义字段ID（如 customfield_xxxxx），请先调用 "
+                    f"get_create_issue_metadata('{project_key}', '{issue_type}') 查询字段映射。")
         return f"创建任务失败: {error_msg}"
 
 
@@ -315,7 +388,8 @@ def get_issue_transitions(issue_key: str = "") -> str:
 
 @tool
 def update_issue(issue_key: str = "", summary: str = None, description: str = None,
-                 priority: str = None, additional_fields: dict = None) -> str:
+                 priority: str = None, additional_fields: dict = None,
+                 project_key: str = "") -> str:
     """
     更新已有 Issue 的字段值（摘要、描述、优先级、自定义字段等）。
     参数：
@@ -323,7 +397,10 @@ def update_issue(issue_key: str = "", summary: str = None, description: str = No
       summary - 新的摘要（可选）
       description - 新的描述（可选）
       priority - 新的优先级名称（可选，如 Medium、High、Low）
-      additional_fields - 其他自定义字段字典（可选，如 {"customfield_xxxxx": "值"}）
+      additional_fields - 其他自定义字段字典（可选）。
+        支持 "Target start" / "Target end" 等显示名，会自动映射字段 ID。
+        也支持 customfield ID 直接传入。
+      project_key - 项目KEY（可选，传了可以更精确地通过项目元数据查找字段 ID）
     """
     if not issue_key:
         return "更新失败：必须提供 issue_key。"
@@ -343,7 +420,14 @@ def update_issue(issue_key: str = "", summary: str = None, description: str = No
             }
         if priority is not None:
             fields["priority"] = {"name": priority}
-        fields.update(process_additional_fields(additional_fields))
+
+        # 处理 additional_fields，如果传了 project_key 则通过项目元数据辅助查找
+        if project_key:
+            processed = _resolve_fields_via_meta(additional_fields, project_key)
+        else:
+            processed = process_additional_fields(additional_fields)
+
+        fields.update(processed)
 
         if not fields:
             return "更新失败：至少需要提供一个待更新的字段。"
@@ -577,6 +661,75 @@ def delete_issue(issue_key: str = "", delete_subtasks: bool = True, confirmed: b
 
 
 @tool
+def batch_delete_issues(issues_json: str = "", delete_subtasks: bool = True, confirmed: bool = False) -> str:
+    """
+    批量删除多个 Jira Issue。
+    警告：此操作不可逆，请谨慎使用！
+
+    参数：
+      issues_json - JSON 字符串，包含 issue_keys 数组。格式示例：
+        {"issue_keys": ["KO-100", "KO-101", "KO-102"]}
+      delete_subtasks - 是否一并删除子任务（默认 True）
+      confirmed - 是否确认删除（默认 False）。当用户回复"确认批量删除"时，将 confirmed 设为 True。
+
+    流程：
+      1. 先以 confirmed=False 调用，系统会列出待删除的 issue 列表让用户确认。
+      2. 用户确认后，再以 confirmed=True 调用执行删除。
+      3. 返回每条删除结果（成功/失败），单条失败不影响其他。
+    """
+    if not issues_json:
+        return "批量删除失败：请提供 issues_json 参数。"
+
+    try:
+        data = json.loads(issues_json)
+        issue_keys = data.get("issue_keys", [])
+        if not issue_keys:
+            return "批量删除失败：issue_keys 列表为空。"
+
+        # 第一步：确认阶段
+        if not confirmed:
+            keys_preview = ", ".join(issue_keys[:10])
+            more = f" ... 还有 {len(issue_keys) - 10} 个" if len(issue_keys) > 10 else ""
+            _logger.warning("用户请求批量删除 %d 个 Issue: %s", len(issue_keys), keys_preview)
+            return (
+                f"⚠️ 批量删除操作有风险，此操作不可逆！\n"
+                f"待删除: {keys_preview}{more}（共 {len(issue_keys)} 个）\n"
+                f"请确认后回复「确认批量删除」以继续。"
+            )
+
+        # 第二步：执行删除
+        _logger.warning("用户确认批量删除 %d 个 Issue", len(issue_keys))
+        results = []
+        success = 0
+        fail = 0
+
+        for raw_key in issue_keys:
+            key = extract_issue_key(str(raw_key).strip())
+            if not key:
+                results.append(f"  ❌ {raw_key} - 无效的 Issue Key")
+                fail += 1
+                continue
+            try:
+                jira.delete_issue(key, delete_subtasks=delete_subtasks)
+                results.append(f"  ✅ {key} - 已删除")
+                success += 1
+                _logger.info("批量删除: %s 已删除", key)
+            except Exception as e:
+                results.append(f"  ❌ {key} - {e}")
+                fail += 1
+                _logger.error("批量删除 %s 失败: %s", key, e)
+
+        summary = f"📊 批量删除完成！成功: {success}, 失败: {fail}"
+        return summary + "\n" + "\n".join(results)
+
+    except json.JSONDecodeError:
+        return "批量删除失败：issues_json 格式无效，请提供有效的 JSON 字符串。"
+    except Exception as e:
+        _logger.error("批量删除失败: %s", e)
+        return f"批量删除失败: {str(e)}"
+
+
+@tool
 def import_from_excel(file_path: str = "", project_key: str = "",
                       summary_col: str = "", issue_type_col: str = "",
                       start_date_col: str = "", end_date_col: str = "",
@@ -762,24 +915,29 @@ def batch_update_dates(updates_json: str = "") -> str:
     """
     批量更新多个 Jira 任务的开始日期和结束日期（用于维护 Jira Plan 时间线）。
 
-    参数 updates_json：JSON 字符串，包含 updates 数组。
+    参数 updates_json：JSON 字符串（或直接传 dict 对象），包含 updates 数组。
 
-    格式示例：
-    {
-      "updates": [
-        {"issue_key": "KO-29", "start_date": "2025-06-01", "end_date": "2025-06-15"},
-        {"issue_key": "KO-30", "start_date": "2025-06-10", "end_date": "2025-06-20"}
-      ]
-    }
+    格式示例（简洁模式）：
+    {"updates": [{"issue_key": "KO-29", "start_date": "2025-06-01", "end_date": "2025-06-15"}]}
+
+    也支持 fields 模式（使用显示名，自动映射 customfield ID）：
+    {"updates": [{"issue_key": "KO-29", "fields": {"Target start": "2026-06-20", "Target end": "2026-06-25"}}]}
+
     说明：
       - issue_key 必填
       - start_date 和 end_date 至少提供一个，格式 YYYY-MM-DD
-      - 如果只更新其中一个，另一个传 null 或不传
+      - 如果使用 fields 模式，支持 "Target start"、"Target end"、"开始日期" 等别名
+      - 两种模式二选一，如果同时提供，fields 优先
     """
     if not updates_json:
         return "批量更新失败：请提供 updates_json 参数。"
     try:
-        data = json.loads(updates_json)
+        if isinstance(updates_json, str):
+            data = json.loads(updates_json)
+        elif isinstance(updates_json, dict):
+            data = updates_json
+        else:
+            return "批量更新失败：updates_json 应为 JSON 字符串或 dict 对象。"
         updates = data.get("updates", [])
         if not updates:
             return "批量更新失败：updates 列表为空。"
@@ -803,25 +961,29 @@ def batch_update_dates(updates_json: str = "") -> str:
                     continue
 
                 fields_to_update = {}
-                start_date = item.get("start_date")
-                end_date = item.get("end_date")
 
-                if start_date:
-                    fields_to_update[Config.TARGET_START_FIELD] = start_date
-                if end_date:
-                    fields_to_update[Config.TARGET_END_FIELD] = end_date
+                # fields 模式（显示名 → customfield 自动映射）
+                raw_fields = item.get("fields")
+                if raw_fields and isinstance(raw_fields, dict):
+                    # 从 issue_key 提取项目KEY（如 EDE-67 → EDE），用于元数据查找
+                    proj = key.split("-")[0] if "-" in key else ""
+                    fields_to_update.update(_resolve_fields_via_meta(raw_fields, proj))
+                else:
+                    # 兼容旧模式：start_date / end_date
+                    start_date = item.get("start_date")
+                    end_date = item.get("end_date")
+                    if start_date:
+                        fields_to_update[Config.TARGET_START_FIELD] = start_date
+                    if end_date:
+                        fields_to_update[Config.TARGET_END_FIELD] = end_date
 
                 if not fields_to_update:
-                    results.append(f"  第{i+1}项: ❌ {key} - 未提供 start_date 或 end_date")
+                    results.append(f"  第{i+1}项: ❌ {key} - 未提供日期字段")
                     fail_count += 1
                     continue
 
                 jira.update_issue_field(key, fields_to_update)
-                changes = []
-                if start_date:
-                    changes.append(f"开始={start_date}")
-                if end_date:
-                    changes.append(f"结束={end_date}")
+                changes = [f"{k}={v}" for k, v in fields_to_update.items()]
                 results.append(f"  第{i+1}项: ✅ {key} - {'; '.join(changes)}")
                 success_count += 1
 

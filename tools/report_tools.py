@@ -2,6 +2,7 @@
 import os
 import html
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from langchain.tools import tool
 from config import Config
@@ -190,14 +191,20 @@ def generate_portfolio_report() -> str:
 
         all_projects_data = []
         today = datetime.now().date()
-        for proj_key in project_list:
+
+        # 为每个项目构建分析任务
+        def _analyze_project(proj_key):
+            """单个项目的分析逻辑（在线程池中并行执行）"""
             try:
                 if not proj_key:
-                    continue
-                issues_list = fetch_all_issues(jira, f"project = {proj_key} ORDER BY updated DESC")
+                    return None
+                issues_list = fetch_all_issues(
+                    jira, f"project = {proj_key} ORDER BY updated DESC",
+                    max_results=Config.JQL_PAGE_SIZE,
+                    max_pages=max(1, Config.ISSUE_FETCH_LIMIT // Config.JQL_PAGE_SIZE),
+                )
                 if not issues_list:
-                    all_projects_data.append({"key": proj_key, "error": "无任务数据"})
-                    continue
+                    return {"key": proj_key, "error": "无任务数据"}
                 progress, _, _ = calculate_project_progress(issues_list)
                 done_count = 0
                 in_progress_count = 0
@@ -226,7 +233,7 @@ def generate_portfolio_report() -> str:
                     if not is_done(status_name) and _is_blocked_by_inward_link(fields.get("issuelinks")):
                         blocked_count += 1
                 risk_level, risks = analyze_project_risk(progress, overdue_count, blocked_count, high_priority_count)
-                all_projects_data.append({
+                return {
                     "key": proj_key,
                     "total": len(issues_list),
                     "done": done_count,
@@ -234,10 +241,22 @@ def generate_portfolio_report() -> str:
                     "progress": progress,
                     "risk_level": risk_level,
                     "risks": risks,
-                    "overdue": overdue_count
-                })
+                    "overdue": overdue_count,
+                }
             except Exception as e:
-                all_projects_data.append({"key": proj_key, "error": str(e)})
+                return {"key": proj_key, "error": str(e)}
+
+        # 并行查询各项目
+        workers = min(Config.REPORT_PARALLEL_WORKERS, len(project_list))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_map = {executor.submit(_analyze_project, pk): pk for pk in project_list}
+            for future in as_completed(future_map):
+                result = future.result()
+                if result is not None:
+                    all_projects_data.append(result)
+        # 保持与 project_list 相同的顺序
+        key_order = {k: i for i, k in enumerate(project_list)}
+        all_projects_data.sort(key=lambda p: key_order.get(p.get("key", ""), 999))
 
         html_template = load_template("portfolio_report.html")
         table_rows = ""

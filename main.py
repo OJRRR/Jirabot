@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """PM小帮手 主入口"""
 import os
+import sqlite3
 import uuid
 from config import Config
 from jira_client import JiraClient
-from utils import setup_logging
+from utils import configure_console_encoding, setup_logging
+
+configure_console_encoding()
 from tools import (
     get_my_tasks,
     get_project_tasks,
@@ -24,6 +27,7 @@ from tools import (
     search_issues,
     assign_issue,
     delete_issue,
+    batch_delete_issues,
     import_from_excel,
     batch_update_dates,
 )
@@ -44,7 +48,7 @@ jira_client = JiraClient()
 jira = jira_client.get_client()
 
 # 启动时尝试自动探测 "Target Start" / "Target End" 字段 ID（环境变量 AUTO_DETECT_FIELDS=0 可关闭）
-if os.getenv("AUTO_DETECT_FIELDS", "1") == "1":
+if os.getenv("AUTO_DETECT_FIELDS", "1") == "1" and not jira_client.is_offline:
     try:
         from field_detector import ensure_target_field_ids
         ensure_target_field_ids(jira_client)
@@ -53,15 +57,22 @@ if os.getenv("AUTO_DETECT_FIELDS", "1") == "1":
         _logging.getLogger("jira_bot").warning("字段自动探测失败: %s", _e)
 
 # ── 创建 LLM（支持任何 OpenAI 兼容 API，含视觉模型）─
-llm = ChatOpenAI(
-    model=Config.MODEL_NAME,
-    api_key=Config.MODEL_API_KEY,
-    base_url=Config.MODEL_API_BASE,
-    temperature=Config.AI_TEMPERATURE,
-    max_tokens=4096,
-)
-print(f"🤖 模型: {Config.MODEL_NAME}")
-print(f"🔗 API: {Config.MODEL_API_BASE}")
+llm = None
+agent = None
+
+try:
+    llm = ChatOpenAI(
+        model=Config.MODEL_NAME,
+        api_key=Config.MODEL_API_KEY,
+        base_url=Config.MODEL_API_BASE,
+        temperature=Config.AI_TEMPERATURE,
+        max_tokens=4096,
+    )
+    print(f"🤖 模型: {Config.MODEL_NAME}")
+    print(f"🔗 API: {Config.MODEL_API_BASE}")
+except Exception as _e:
+    import logging as _logging
+    _logging.getLogger("jira_bot").warning("LLM 初始化失败（离线模式）: %s", _e)
 
 # 工具列表
 tools = [
@@ -83,39 +94,49 @@ tools = [
     search_issues,
     assign_issue,
     delete_issue,
+    batch_delete_issues,
     import_from_excel,
     batch_update_dates,
 ]
 
-from prompts import SYSTEM_PROMPT_TEMPLATE
+if llm is not None:
+    from prompts import SYSTEM_PROMPT_TEMPLATE
 
-# 系统提示词
-system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-    target_projects=Config.TARGET_PROJECTS if Config.TARGET_PROJECTS else '所有项目'
-)
+    # 系统提示词
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+        target_projects=Config.TARGET_PROJECTS if Config.TARGET_PROJECTS else '所有项目'
+    )
 
-# 创建 Agent
-# 会话存储：默认用 SQLite 落盘到 BASE_DIR/sessions.db，重启不丢会话
-# 设置环境变量 JIRA_SESSION_BACKEND=memory 可回退到纯内存（多进程调试时方便）
-_session_backend = os.getenv("JIRA_SESSION_BACKEND", "sqlite").lower()
-_sessions_dir = os.path.join(Config.BASE_DIR, "sessions")
-os.makedirs(_sessions_dir, exist_ok=True)
-_session_db_path = os.path.join(_sessions_dir, "sessions.db")
+    # 创建 Agent
+    # 会话存储：默认用 SQLite 落盘到 BASE_DIR/sessions.db，重启不丢会话
+    # 设置环境变量 JIRA_SESSION_BACKEND=memory 可回退到纯内存（多进程调试时方便）
+    _session_backend = os.getenv("JIRA_SESSION_BACKEND", "sqlite").lower()
+    _sessions_dir = os.path.join(Config.BASE_DIR, "sessions")
+    os.makedirs(_sessions_dir, exist_ok=True)
+    _session_db_path = os.path.join(_sessions_dir, "sessions.db")
 
-if _session_backend == "memory":
-    checkpointer = MemorySaver()
-    print(f"💾 会话存储: MemorySaver（重启即丢失）")
+    if _session_backend == "memory":
+        checkpointer = MemorySaver()
+        print(f"💾 会话存储: MemorySaver（重启即丢失）")
+    else:
+        # SqliteSaver 需要长期存活的 connection（from_conn_string 是 context manager，不能直接当 checkpointer）
+        _sqlite_conn = sqlite3.connect(_session_db_path, check_same_thread=False)
+        checkpointer = SqliteSaver(_sqlite_conn)
+        print(f"💾 会话存储: SqliteSaver → {_session_db_path}")
+
+    try:
+        agent = create_react_agent(
+            model=llm,
+            tools=tools,
+            prompt=system_prompt,
+            checkpointer=checkpointer
+        )
+        print("✅ Agent 初始化成功")
+    except Exception as _e:
+        import logging as _logging
+        _logging.getLogger("jira_bot").warning("Agent 初始化失败: %s", _e)
 else:
-    # SqliteSaver 需要一个长期存活的 connection；用 from_conn_string 自带管理
-    checkpointer = SqliteSaver.from_conn_string(_session_db_path)
-    print(f"💾 会话存储: SqliteSaver → {_session_db_path}")
-
-agent = create_react_agent(
-    model=llm,
-    tools=tools,
-    prompt=system_prompt,
-    checkpointer=checkpointer
-)
+    print("⚠️ LLM 未初始化，Agent 不可用（离线模式）")
 
 def main():
     print("\n" + "=" * 60)

@@ -25,6 +25,7 @@ _LAZY_TOOLS = {
     "search_issues": "task_tools",
     "assign_issue": "task_tools",
     "delete_issue": "task_tools",
+    "batch_delete_issues": "task_tools",
     "import_from_excel": "task_tools",
     "batch_update_dates": "task_tools",
     # report_tools

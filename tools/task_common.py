@@ -9,11 +9,43 @@ from ._lazy import LazyJira
 _logger = logging.getLogger("jira_bot.task_tools")
 jira = LazyJira()
 
+# Target Start / Target End 常见显示名 → 映射到 Config 中的 customfield ID
+_TARGET_START_ALIASES = frozenset({
+    "targetstart", "target start", "target_start",
+    "start date", "startdate", "start",
+    "planned start", "planned start date",
+    "开始日期", "开始时间", "开始",
+})
+_TARGET_END_ALIASES = frozenset({
+    "targetend", "target end", "target_end",
+    "end date", "enddate", "end",
+    "due date", "duedate",
+    "planned end", "planned completed date", "planned end date",
+    "结束日期", "结束时间", "结束", "截止",
+})
+
+
+def _normalize_field_key(key: str) -> str:
+    """把 Target Start/End 的显示名或别名映射为 customfield ID。"""
+    if not key or key.startswith("customfield_"):
+        return key
+    normalized = " ".join(key.strip().lower().replace("-", " ").replace("_", " ").split())
+    if normalized in _TARGET_START_ALIASES:
+        return Config.TARGET_START_FIELD
+    if normalized in _TARGET_END_ALIASES:
+        return Config.TARGET_END_FIELD
+    return key
+
+
+def _is_date_custom_field(key: str) -> bool:
+    return key in (Config.TARGET_START_FIELD, Config.TARGET_END_FIELD)
+
 
 def process_additional_fields(additional_fields: dict) -> dict:
     """
     把 additional_fields 转成 Jira API 接受的格式：
-    - customfield_* 的字符串值需要包成 {"value": "..."}（Jira 选项型字段要求）
+    - Target Start/End 显示名自动映射为 customfield ID，日期值用 YYYY-MM-DD 字符串
+    - 其他 customfield_* 的字符串值包成 {"value": "..."}（Jira 选项型字段要求）
     - 其他字段原样透传
 
     之前在 task_tools.py 里 _build_issue_fields / create_issue / update_issue 三处重复
@@ -23,10 +55,19 @@ def process_additional_fields(additional_fields: dict) -> dict:
         return {}
     processed = {}
     for k, v in additional_fields.items():
-        if k.startswith("customfield") and isinstance(v, str):
-            processed[k] = {"value": v}
+        field_key = _normalize_field_key(k)
+        if _is_date_custom_field(field_key) and isinstance(v, str):
+            # 已知的日期自定义字段 → 直接传日期字符串
+            processed[field_key] = v
+        elif field_key.startswith("customfield") and isinstance(v, str):
+            # 尝试探测是否是日期字段：值匹配 YYYY-MM-DD 或带 T 的 ISO 格式
+            import re as _re
+            if _re.match(r'^\d{4}-\d{2}-\d{2}', v):
+                processed[field_key] = v
+            else:
+                processed[field_key] = {"value": v}
         else:
-            processed[k] = v
+            processed[field_key] = v
     return processed
 
 

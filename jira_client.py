@@ -9,21 +9,24 @@ _logger = logging.getLogger("jira_bot.client")
 
 
 class JiraClient:
-    """Jira 客户端单例"""
+    """Jira 客户端单例（支持离线降级）"""
 
     _instance = None
     _last_call_time = 0
     _min_interval = 0.5  # 最小调用间隔（秒）
+    _offline = False     # True 表示初始化失败，处于离线模式
 
     def __new__(cls):
         if cls._instance is None:
             instance = super().__new__(cls)
             try:
                 instance._init_client()
-                cls._instance = instance
-            except Exception:
-                # 初始化失败时重置 _instance，允许下次重试
-                raise
+            except Exception as e:
+                # 初始化失败时仍保留实例（离线模式），webapp 等场景需要
+                instance.client = None
+                instance._offline = True
+                _logger.warning("Jira 连接失败（离线模式）: %s", e)
+            cls._instance = instance
         return cls._instance
 
     def _init_client(self):
@@ -36,7 +39,13 @@ class JiraClient:
         )
         # 测试连接
         self.client.jql("assignee = currentUser()")
+        self._offline = False
         _logger.info("Jira 连接成功 (%s)", Config.JIRA_SERVER)
+
+    @property
+    def is_offline(self) -> bool:
+        """是否处于离线模式（Jira 不可达）"""
+        return self._offline
 
     def _rate_limit(self):
         """速率限制：确保 API 调用间隔不小于 _min_interval"""
@@ -46,7 +55,9 @@ class JiraClient:
         self._last_call_time = time.time()
 
     def get_client(self):
-        """获取原始 Jira 客户端实例"""
+        """获取原始 Jira 客户端实例（离线时返回 None）"""
+        if self._offline:
+            _logger.warning("Jira 客户端处于离线模式，操作不可用")
         return self.client
 
     def jql(self, jql: str, start=0, start_at=None, limit=100):

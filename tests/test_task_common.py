@@ -40,6 +40,34 @@ class TestProcessAdditionalFields:
         assert result["customfield_111"] == {"value": "Option A"}
         assert result["summary"] == "test"
 
+    def test_target_start_display_name_maps_to_customfield(self, monkeypatch):
+        monkeypatch.setattr(Config, "TARGET_START_FIELD", "customfield_16519")
+        result = process_additional_fields({"Target Start": "2025-06-08"})
+        assert result == {"customfield_16519": "2025-06-08"}
+
+    def test_target_end_aliases(self, monkeypatch):
+        monkeypatch.setattr(Config, "TARGET_END_FIELD", "customfield_16520")
+        for alias in ("targetEnd", "Target End", "Start Date", "End Date"):
+            if alias == "Start Date":
+                monkeypatch.setattr(Config, "TARGET_START_FIELD", "customfield_16519")
+                result = process_additional_fields({alias: "2025-06-08"})
+                assert result == {"customfield_16519": "2025-06-08"}
+            else:
+                result = process_additional_fields({alias: "2025-12-31"})
+                assert result == {"customfield_16520": "2025-12-31"}
+
+    def test_date_customfield_not_wrapped_as_option(self, monkeypatch):
+        monkeypatch.setattr(Config, "TARGET_START_FIELD", "customfield_16519")
+        monkeypatch.setattr(Config, "TARGET_END_FIELD", "customfield_16520")
+        result = process_additional_fields({
+            "customfield_16519": "2025-06-08",
+            "customfield_16520": "2025-12-31",
+        })
+        assert result == {
+            "customfield_16519": "2025-06-08",
+            "customfield_16520": "2025-12-31",
+        }
+
 
 class TestBuildIssueFields:
     def test_basic_fields(self):

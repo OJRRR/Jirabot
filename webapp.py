@@ -8,8 +8,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from config import Config
+from utils import configure_console_encoding, setup_logging
+
+configure_console_encoding()
+
 from main import agent
-from utils import setup_logging
+
+# 离线模式提示（agent 为 None 时，聊天 API 不可用）
+_AGENT_OFFLINE_MSG = "⚠️ Agent 未初始化（LLM/Jira 不可达），请检查网络和 .env 配置后重启。"
 
 # 初始化日志（与 CLI 入口共用配置；setup_logging 内部有幂等保护）
 setup_logging(Config.LOG_FILE)
@@ -49,6 +55,8 @@ def index():
 # ── 普通聊天 API（非流式）─────────────────
 @app.route("/api/chat", methods=["POST"])
 def chat():
+    if agent is None:
+        return jsonify({"error": _AGENT_OFFLINE_MSG}), 503
     data = request.get_json()
     user_message = (data.get("message") or "").strip()
     if not user_message:
@@ -148,6 +156,8 @@ def _format_sse(event: dict) -> str:
 
 @app.route("/api/chat/stream", methods=["POST"])
 def chat_stream():
+    if agent is None:
+        return jsonify({"error": _AGENT_OFFLINE_MSG}), 503
     data = request.get_json()
     user_message = (data.get("message") or "").strip()
     if not user_message:
@@ -240,6 +250,8 @@ def _build_user_message(text: str, file_path: str, file_type: str) -> str:
 # ── 聊天中附带文件消息 ──────────────────
 @app.route("/api/chat_with_file", methods=["POST"])
 def chat_with_file():
+    if agent is None:
+        return jsonify({"error": _AGENT_OFFLINE_MSG}), 503
     """用户发送消息时附带文件路径，AI 自动处理"""
     data = request.get_json()
     user_message = _build_user_message(
@@ -270,6 +282,8 @@ def chat_with_file():
 # ── SSE 流式聊天 + 文件 ──────────────────
 @app.route("/api/chat_with_file/stream", methods=["POST"])
 def chat_with_file_stream():
+    if agent is None:
+        return jsonify({"error": _AGENT_OFFLINE_MSG}), 503
     data = request.get_json()
     user_message = _build_user_message(
         data.get("message"),
