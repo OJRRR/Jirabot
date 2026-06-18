@@ -30,6 +30,7 @@ _LAZY_TOOLS = {
     "batch_update_dates": "task_tools",
     "batch_update_issues": "task_tools",
     "suggest_epic_tasks": "task_tools",
+    "analyze_meeting_for_projects": "task_tools",
     # report_tools
     "generate_report": "report_tools",
     "generate_portfolio_report": "report_tools",

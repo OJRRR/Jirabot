@@ -32,6 +32,7 @@ from tools import (
     batch_update_dates,
     batch_update_issues,
     suggest_epic_tasks,
+    analyze_meeting_for_projects,
 )
 
 from langchain_openai import ChatOpenAI
@@ -101,6 +102,7 @@ tools = [
     batch_update_dates,
     batch_update_issues,
     suggest_epic_tasks,
+    analyze_meeting_for_projects,
 ]
 
 if llm is not None:

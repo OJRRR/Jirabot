@@ -22,6 +22,7 @@ from tools.task_tools import (
     batch_update_dates,
     batch_update_issues,
     suggest_epic_tasks,
+    analyze_meeting_for_projects,
 )
 
 
@@ -510,3 +511,53 @@ class TestSuggestEpicTasks:
             assert data["existing_count"] == 2
             assert len(data["existing_sub_tasks"]) == 2
             assert data["existing_sub_tasks"][0]["key"] == "KO-101"
+
+
+class TestAnalyzeMeetingForProjects:
+    """测试 analyze_meeting_for_projects @tool 函数"""
+
+    def test_missing_params(self):
+        result = analyze_meeting_for_projects.invoke({"meeting_notes": "", "project_key": ""})
+        data = json.loads(result)
+        assert "error" in data
+
+    def test_missing_notes(self):
+        result = analyze_meeting_for_projects.invoke({"meeting_notes": "", "project_key": "KO"})
+        data = json.loads(result)
+        assert "error" in data
+
+    def test_successful_analysis(self):
+        with patch("tools.task_tools.jira") as mock_jira:
+            mock_jira.jql.return_value = {"issues": []}
+            result = analyze_meeting_for_projects.invoke({
+                "meeting_notes": "我们要做一个用户登录模块和支付模块",
+                "project_key": "KO",
+            })
+            data = json.loads(result)
+            assert data["project_key"] == "KO"
+            assert "meeting_notes" in data
+            assert "format_hint" in data
+            assert data["meeting_notes"] == "我们要做一个用户登录模块和支付模块"
+
+    def test_with_existing_epics(self):
+        with patch("tools.task_tools.jira") as mock_jira:
+            mock_jira.jql.return_value = {
+                "issues": [
+                    {
+                        "key": "KO-100",
+                        "fields": {
+                            "summary": "已有Epic",
+                            "issuetype": {"name": "Epic"},
+                            "status": {"name": "In Progress"},
+                        },
+                    },
+                ]
+            }
+            result = analyze_meeting_for_projects.invoke({
+                "meeting_notes": "新增报表模块",
+                "project_key": "KO",
+            })
+            data = json.loads(result)
+            assert len(data["existing_epics"]) == 1
+            assert data["existing_epics"][0]["key"] == "KO-100"
+            assert data["existing_epics"][0]["summary"] == "已有Epic"

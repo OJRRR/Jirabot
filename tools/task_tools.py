@@ -1193,3 +1193,87 @@ def suggest_epic_tasks(epic_key: str = "") -> str:
     except Exception as e:
         _logger.error("获取 Epic 详情失败 %s: %s", epic_key, e)
         return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@tool
+def analyze_meeting_for_projects(meeting_notes: str = "", project_key: str = "") -> str:
+    """
+    分析项目会议纪要，生成 Epic → Task → Sub-task 的完整项目结构建议。
+    调用此工具后，AI 应根据返回的项目元数据和会议纪要内容，
+    生成结构化的任务分解建议并展示给用户确认。
+
+    参数：
+      meeting_notes - 会议纪要文本（必填），内容越详细，生成的任务结构越准确
+      project_key - 目标项目 KEY（必填），如 KO
+
+    返回 JSON 字符串，包含：
+      - 项目元数据（支持的问题类型、必填字段等）
+      - 会议纪要原文
+      - 格式提示（指导 AI 如何生成结构）
+    """
+    if not meeting_notes or not project_key:
+        return json.dumps({"error": "请提供 meeting_notes（会议纪要）和 project_key（项目KEY）"}, ensure_ascii=False)
+
+    try:
+        key = validate_project_key(project_key)
+        _logger.info("分析会议纪要，项目: %s", key)
+
+        # 获取项目元数据（了解支持的问题类型和字段）
+        meta_str = get_create_issue_metadata.invoke({"project_key": key})
+        meta_data = json.loads(meta_str) if isinstance(meta_str, str) else meta_str
+
+        # 获取项目中已有的 Epic 列表（避免重复创建）
+        existing_epics = fetch_all_issues(
+            jira, f'project = {key} AND issuetype = Epic ORDER BY created DESC',
+            max_results=20,
+        )
+        existing_epic_list = []
+        for ep in existing_epics or []:
+            if not ep:
+                continue
+            f = ep.get("fields", {}) or {}
+            existing_epic_list.append({
+                "key": ep.get("key"),
+                "summary": f.get("summary", ""),
+                "status": (f.get("status", {}) or {}).get("name", ""),
+            })
+
+        result = {
+            "project_key": key,
+            "meeting_notes": meeting_notes,
+            "project_metadata": meta_data,
+            "existing_epics": existing_epic_list,
+            "format_hint": (
+                "请根据会议纪要和项目元数据，生成建议的项目任务结构。\n"
+                "按以下 JSON 格式输出建议（只输出 JSON，不要额外说明）：\n"
+                "{\n"
+                '  "epics": [\n'
+                "    {\n"
+                '      "summary": "Epic 标题",\n'
+                '      "description": "Epic 描述",\n'
+                '      "tasks": [\n'
+                "        {\n"
+                '          "summary": "Task 标题",\n'
+                '          "description": "Task 描述",\n'
+                '          "sub_tasks": [\n'
+                '            { "summary": "Sub-task 标题", "description": "描述（可选）" }\n'
+                "          ]\n"
+                "        }\n"
+                "      ]\n"
+                "    }\n"
+                "  ]\n"
+                "}\n"
+                "说明：\n"
+                "- epic_link_key 会在创建时自动关联，不需要在建议中包含\n"
+                "- parent_key 会在创建 Sub-task 时自动关联到父 Task\n"
+                "- 每个 Epic 建议 3-8 个 Task，每个 Task 建议 0-5 个 Sub-task\n"
+                "- 优先使用项目元数据中的问题类型和字段\n"
+                "- 如果会议纪要不够详细，可以根据常识合理补充"
+            ),
+        }
+
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        _logger.error("分析会议纪要失败: %s", e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
