@@ -30,6 +30,8 @@ from tools import (
     batch_delete_issues,
     import_from_excel,
     batch_update_dates,
+    batch_update_issues,
+    suggest_epic_tasks,
 )
 
 from langchain_openai import ChatOpenAI
@@ -97,6 +99,8 @@ tools = [
     batch_delete_issues,
     import_from_excel,
     batch_update_dates,
+    batch_update_issues,
+    suggest_epic_tasks,
 ]
 
 if llm is not None:

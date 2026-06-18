@@ -28,6 +28,8 @@ _LAZY_TOOLS = {
     "batch_delete_issues": "task_tools",
     "import_from_excel": "task_tools",
     "batch_update_dates": "task_tools",
+    "batch_update_issues": "task_tools",
+    "suggest_epic_tasks": "task_tools",
     # report_tools
     "generate_report": "report_tools",
     "generate_portfolio_report": "report_tools",

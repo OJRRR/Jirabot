@@ -20,6 +20,8 @@ from tools.task_tools import (
     delete_issue,
     import_from_excel,
     batch_update_dates,
+    batch_update_issues,
+    suggest_epic_tasks,
 )
 
 
@@ -370,3 +372,141 @@ class TestGetCreateIssueMetadata:
             result = get_create_issue_metadata.invoke({"project_key": "KO"})
             data = json.loads(result)
             assert "error" in data
+
+
+class TestBatchUpdateIssues:
+    """测试 batch_update_issues @tool 函数"""
+
+    def test_empty_input(self):
+        result = batch_update_issues.invoke({"updates_json": ""})
+        assert "失败" in result
+
+    def test_empty_updates(self):
+        result = batch_update_issues.invoke({"updates_json": '{"updates": []}'})
+        assert "失败" in result
+
+    def test_missing_issue_key(self):
+        updates_json = json.dumps({"updates": [{"assignee": "张三"}]})
+        result = batch_update_issues.invoke({"updates_json": updates_json})
+        assert "成功: 0" in result
+
+    def test_no_fields_to_update(self):
+        updates_json = json.dumps({"updates": [{"issue_key": "KO-1"}]})
+        result = batch_update_issues.invoke({"updates_json": updates_json})
+        assert "成功: 0" in result
+
+    def test_assign_success(self):
+        with patch("tools.task_tools.jira") as mock_jira:
+            updates_json = json.dumps({
+                "updates": [{"issue_key": "KO-1", "assignee": "张三"}]
+            })
+            result = batch_update_issues.invoke({"updates_json": updates_json})
+            assert "成功: 1" in result
+            assert "负责人→张三" in result
+
+    def test_assign_and_transition_and_priority(self):
+        with patch("tools.task_tools.jira") as mock_jira:
+            updates_json = json.dumps({
+                "updates": [{
+                    "issue_key": "KO-1",
+                    "assignee": "张三",
+                    "status": "In Progress",
+                    "priority": "High"
+                }]
+            })
+            result = batch_update_issues.invoke({"updates_json": updates_json})
+            assert "成功: 1" in result
+            assert "负责人→张三" in result
+            assert "状态→In Progress" in result
+            assert "优先级→High" in result
+
+    def test_mixed_success_and_failure(self):
+        with patch("tools.task_tools.jira") as mock_jira:
+            mock_jira.assign_issue.side_effect = Exception("分配失败")
+            updates_json = json.dumps({
+                "updates": [
+                    {"issue_key": "KO-1", "assignee": "张三"},
+                    {"issue_key": "KO-2", "assignee": "李四"},
+                ]
+            })
+            result = batch_update_issues.invoke({"updates_json": updates_json})
+            assert "成功: 0" in result
+
+
+class TestSuggestEpicTasks:
+    """测试 suggest_epic_tasks @tool 函数"""
+
+    def test_missing_key(self):
+        result = suggest_epic_tasks.invoke({"epic_key": ""})
+        data = json.loads(result)
+        assert "error" in data
+
+    def test_not_an_epic(self):
+        with patch("tools.task_tools.jira") as mock_jira:
+            mock_jira.get_issue.return_value = {
+                "key": "KO-100",
+                "fields": {
+                    "summary": "不是Epic",
+                    "issuetype": {"name": "Task"},
+                    "status": {"name": "To Do"},
+                },
+            }
+            result = suggest_epic_tasks.invoke({"epic_key": "KO-100"})
+            data = json.loads(result)
+            assert "warning" in data
+
+    def test_epic_with_details(self):
+        with patch("tools.task_tools.jira") as mock_jira:
+            mock_jira.get_issue.return_value = {
+                "key": "KO-100",
+                "fields": {
+                    "summary": "用户登录模块",
+                    "description": "实现用户登录功能",
+                    "issuetype": {"name": "Epic"},
+                    "status": {"name": "To Do"},
+                    "assignee": {"displayName": "张三"},
+                },
+            }
+            mock_jira.jql.return_value = {"issues": []}
+            result = suggest_epic_tasks.invoke({"epic_key": "KO-100"})
+            data = json.loads(result)
+            assert data["epic_key"] == "KO-100"
+            assert data["summary"] == "用户登录模块"
+            assert data["existing_count"] == 0
+            assert "hint" in data
+
+    def test_epic_with_existing_subtasks(self):
+        with patch("tools.task_tools.jira") as mock_jira:
+            mock_jira.get_issue.return_value = {
+                "key": "KO-100",
+                "fields": {
+                    "summary": "用户登录模块",
+                    "issuetype": {"name": "Epic"},
+                    "status": {"name": "In Progress"},
+                },
+            }
+            mock_jira.jql.return_value = {
+                "issues": [
+                    {
+                        "key": "KO-101",
+                        "fields": {
+                            "summary": "设计登录页面",
+                            "status": {"name": "Done"},
+                            "assignee": {"displayName": "张三"},
+                        },
+                    },
+                    {
+                        "key": "KO-102",
+                        "fields": {
+                            "summary": "实现登录API",
+                            "status": {"name": "In Progress"},
+                            "assignee": {"displayName": "李四"},
+                        },
+                    },
+                ]
+            }
+            result = suggest_epic_tasks.invoke({"epic_key": "KO-100"})
+            data = json.loads(result)
+            assert data["existing_count"] == 2
+            assert len(data["existing_sub_tasks"]) == 2
+            assert data["existing_sub_tasks"][0]["key"] == "KO-101"

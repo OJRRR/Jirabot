@@ -999,3 +999,197 @@ def batch_update_dates(updates_json: str = "") -> str:
     except Exception as e:
         _logger.error("批量更新日期失败: %s", e)
         return f"批量更新失败: {str(e)}"
+
+
+@tool
+def batch_update_issues(updates_json: str = "") -> str:
+    """
+    批量更新多个 Jira 任务的负责人、状态、优先级。
+    一次调用可同时改多个字段，逐条执行，单条失败不影响其他。
+
+    参数 updates_json：JSON 字符串，包含 updates 数组。
+
+    格式示例：
+    {"updates": [
+        {"issue_key": "KO-1", "assignee": "张三", "status": "In Progress", "priority": "High"},
+        {"issue_key": "KO-2", "assignee": "李四"},
+        {"issue_key": "KO-3", "status": "Done"}
+    ]}
+
+    说明：
+      - issue_key 必填
+      - assignee / status / priority 均为可选，至少提供一个
+      - status 为目标状态名称（如 "In Progress"、"Done"），会自动查找可用转换
+      - priority 为优先级名称（如 "High"、"Medium"、"Low"）
+    """
+    if not updates_json:
+        return "批量更新失败：请提供 updates_json 参数。"
+    try:
+        if isinstance(updates_json, str):
+            data = json.loads(updates_json)
+        elif isinstance(updates_json, dict):
+            data = updates_json
+        else:
+            return "批量更新失败：updates_json 应为 JSON 字符串或 dict 对象。"
+        updates = data.get("updates", [])
+        if not updates:
+            return "批量更新失败：updates 列表为空。"
+
+        results = []
+        success_count = 0
+        fail_count = 0
+
+        for i, item in enumerate(updates):
+            issue_key = (item.get("issue_key") or "").strip()
+            if not issue_key:
+                results.append(f"  第{i+1}项: ❌ 缺少 issue_key")
+                fail_count += 1
+                continue
+
+            try:
+                key = extract_issue_key(issue_key)
+                if not key:
+                    results.append(f"  第{i+1}项: ❌ 无效的 issue_key: {issue_key}")
+                    fail_count += 1
+                    continue
+
+                changes = []
+                has_work = False
+
+                # 1) 分配负责人
+                assignee = item.get("assignee")
+                if assignee and str(assignee).strip():
+                    has_work = True
+                    try:
+                        jira.assign_issue(key, str(assignee).strip())
+                        changes.append(f"负责人→{assignee}")
+                    except Exception as e:
+                        results.append(f"  第{i+1}项: ❌ {key} - 分配失败: {e}")
+                        fail_count += 1
+                        continue
+
+                # 2) 转换状态
+                status = item.get("status")
+                if status and str(status).strip():
+                    has_work = True
+                    target_status = str(status).strip()
+                    try:
+                        jira.transition_issue(key, target_status)
+                        changes.append(f"状态→{target_status}")
+                    except Exception as e:
+                        _logger.warning("状态转换失败 %s -> %s: %s", key, target_status, e)
+                        results.append(f"  第{i+1}项: ❌ {key} - 状态转换失败: {e}（目标状态可能不可用，请先用 get_issue_transitions 查看可用状态）")
+                        fail_count += 1
+                        continue
+
+                # 3) 更新优先级
+                priority = item.get("priority")
+                if priority and str(priority).strip():
+                    has_work = True
+                    try:
+                        jira.update_issue_field(key, {"priority": {"name": str(priority).strip()}})
+                        changes.append(f"优先级→{priority}")
+                    except Exception as e:
+                        _logger.warning("优先级更新失败 %s -> %s: %s", key, priority, e)
+                        results.append(f"  第{i+1}项: ❌ {key} - 优先级更新失败: {e}")
+                        fail_count += 1
+                        continue
+
+                if not has_work:
+                    results.append(f"  第{i+1}项: ❌ {key} - 未提供任何待更新的字段（assignee/status/priority）")
+                    fail_count += 1
+                    continue
+
+                results.append(f"  第{i+1}项: ✅ {key} - {'; '.join(changes)}")
+                success_count += 1
+
+            except Exception as e:
+                results.append(f"  第{i+1}项: ❌ {issue_key} - {str(e)}")
+                fail_count += 1
+
+        summary_text = f"批量更新完成！成功: {success_count}, 失败: {fail_count}"
+        return f"{summary_text}\n" + "\n".join(results)
+
+    except json.JSONDecodeError:
+        return f"批量更新失败：updates_json 格式无效，请提供有效的 JSON 字符串。"
+    except Exception as e:
+        _logger.error("批量更新失败: %s", e)
+        return f"批量更新失败: {str(e)}"
+
+
+@tool
+def suggest_epic_tasks(epic_key: str = "") -> str:
+    """
+    获取 Epic 任务的详细信息（标题、描述等），供 AI 自动拆分子任务。
+    调用此工具后，AI 会根据 Epic 的标题和描述内容，自动生成建议的子 Task 清单。
+
+    参数：epic_key - Epic 的任务 KEY（如 KO-100）
+    返回 JSON 字符串，包含 Epic 的详细信息和现有子任务列表。
+    """
+    if not epic_key:
+        return json.dumps({"error": "请提供 Epic 的任务 KEY（如 KO-100）"}, ensure_ascii=False)
+    try:
+        key = extract_issue_key(epic_key)
+        if not key:
+            return json.dumps({"error": "请提供有效的 Epic 任务 KEY（如 KO-100）"}, ensure_ascii=False)
+
+        _logger.info("获取 Epic 详情用于拆分: %s", key)
+        issue = jira.get_issue(key)
+        fields = issue.get("fields", {})
+        issue_type = fields.get("issuetype", {}) or {}
+        issue_type_name = (issue_type.get("name") or "").lower()
+
+        # 检查是否为 Epic
+        if issue_type_name != "epic":
+            return json.dumps({
+                "warning": f"该任务 ({key}) 的问题类型为「{issue_type.get('name', '未知')}」，不是 Epic。"
+                           f"建议先创建 Epic 类型的任务再拆分。",
+                "epic_key": key,
+                "summary": fields.get("summary", ""),
+            }, ensure_ascii=False, indent=2)
+
+        # 获取 Epic 的子任务（通过 epic_link 字段）
+        project_key = key.split("-")[0]
+        epic_field = Config.EPIC_LINK_FIELD_ID or f"\"Epic Link\""
+        jql_query = f'project = {project_key} AND "{epic_field}" = {key} ORDER BY created ASC'
+        existing_tasks = fetch_all_issues(jira, jql_query, max_results=50)
+
+        sub_tasks = []
+        for t in existing_tasks:
+            if not t:
+                continue
+            f = t.get("fields", {}) or {}
+            sub_tasks.append({
+                "key": t.get("key"),
+                "summary": f.get("summary", ""),
+                "status": (f.get("status", {}) or {}).get("name", ""),
+                "assignee": (f.get("assignee", {}) or {}).get("displayName", "未分配"),
+            })
+
+        # 构建返回信息
+        description = fields.get("description", "") or ""
+        if isinstance(description, dict):
+            # 处理 ADF 格式的描述
+            try:
+                import json as _json
+                description = _json.dumps(description, ensure_ascii=False)
+            except Exception:
+                description = str(description)
+
+        result = {
+            "epic_key": key,
+            "summary": fields.get("summary", ""),
+            "description": (description[:1000] + "...") if len(description) > 1000 else description,
+            "project": project_key,
+            "status": (fields.get("status", {}) or {}).get("name", ""),
+            "assignee": (fields.get("assignee", {}) or {}).get("displayName", "未分配"),
+            "existing_sub_tasks": sub_tasks,
+            "existing_count": len(sub_tasks),
+            "hint": "请根据 Epic 的标题和描述，生成建议拆分的子 Task 清单。每个 Task 应包含 summary 和可选的 description。"
+        }
+
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        _logger.error("获取 Epic 详情失败 %s: %s", epic_key, e)
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
