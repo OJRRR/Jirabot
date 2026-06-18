@@ -1,5 +1,5 @@
 """PM小帮手 Web 界面 — 支持文件上传 & SSE 流式输出"""
-import sys, os, json, uuid, re, mimetypes
+import sys, os, json, uuid, re, mimetypes, base64
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import (Flask, render_template, request, jsonify, session,
@@ -13,6 +13,7 @@ from utils import configure_console_encoding, setup_logging
 configure_console_encoding()
 
 from main import agent
+from langchain_core.messages import HumanMessage
 
 # 离线模式提示（agent 为 None 时，聊天 API 不可用）
 _AGENT_OFFLINE_MSG = "⚠️ Agent 未初始化（LLM/Jira 不可达），请检查网络和 .env 配置后重启。"
@@ -79,74 +80,89 @@ def chat():
 
 
 # ── SSE 流式聊天 API ──────────────────────
-def _sse_iter_events(stream_iter):
+async def _sse_iter_events(stream_iter):
     """
-    把 LangGraph agent.stream 的输出统一转成 SSE 事件。
-    保持向后兼容：assistant 文本仍以 {"text": "..."} 形式发出，前端会拼接。
-    新增事件：
-      {"type": "thinking"}       — agent 节点产出、还没工具调用
-      {"type": "tool_call", "name", "args"} — agent 要调用工具
-      {"type": "tool_result", "name", "content", "ok"} — 工具返回
-      {"type": "final"}          — 末尾收尾
-      {"done": true}             — 终止
+    使用 astream_events() 实现真正的 token 级流式输出。
+    事件：
+      {"text": "..."}           — 逐 token 流式文本
+      {"tool_call": "..."}      — AI 正在调用工具（提示前端显示等待状态）
+      {"type": "final"}         — 末尾收尾
+      {"done": true}            — 终止
     """
     accumulated_text = ""
-    last_tool_results = []  # 收集当批工具结果，等下一个 agent 节点一次性 emit
 
-    for chunk in stream_iter:
-        if not isinstance(chunk, dict):
+    async for event in stream_iter:
+        kind = event.get("event", "")
+
+        # 工具调用开始 — 仅通知前端（不附带 text，避免被当作回复渲染）
+        if kind == "on_tool_start":
+            tool_name = event.get("name", "unknown")
+            yield {"tool_call": tool_name}
             continue
-        for node_name, node_output in chunk.items():
-            if not isinstance(node_output, dict) or "messages" not in node_output:
-                continue
-            for msg in node_output["messages"]:
-                # 1) ToolMessage：工具返回值
-                if msg.__class__.__name__ == "ToolMessage":
-                    name = getattr(msg, "name", "") or "tool"
-                    content = getattr(msg, "content", "")
-                    if isinstance(content, list):
-                        # 多模态/分段时只取文本
-                        content = "".join(
-                            (c.get("text", "") if isinstance(c, dict) else str(c))
-                            for c in content
-                        )
-                    ok = not (isinstance(content, str) and content.startswith("Error"))
-                    yield {
-                        "type": "tool_result",
-                        "name": name,
-                        "content": content if isinstance(content, str) else str(content),
-                        "ok": ok,
-                    }
-                    continue
 
-                # 2) AIMessage
-                tool_calls = getattr(msg, "tool_calls", None) or []
-                text = getattr(msg, "content", "") or ""
+        # 只取 LLM 逐 token 输出
+        if kind == "on_chat_model_stream":
+            chunk = event.get("data", {}).get("chunk")
+            if chunk and hasattr(chunk, "content") and chunk.content:
+                text = chunk.content
                 if isinstance(text, list):
                     text = "".join(
                         (c.get("text", "") if isinstance(c, dict) else str(c))
                         for c in text
                     )
-
-                if tool_calls:
-                    for tc in tool_calls:
-                        yield {
-                            "type": "tool_call",
-                            "name": tc.get("name", "tool"),
-                            "args": tc.get("args", {}),
-                        }
-                    # 即使带 tool_calls 也可能附带文本思考
-                    if text and text.strip():
-                        accumulated_text += text
-                        yield {"type": "thinking", "content": text}
-                elif text and text.strip():
-                    # 没有工具调用 → 这是终态回复，分片发出（前端拼接）
+                if text:
                     accumulated_text += text
                     yield {"text": text}
 
     if accumulated_text:
         yield {"type": "final"}
     yield {"done": True}
+
+
+def _sync_iter(async_gen):
+    """在独立线程的事件循环中运行异步迭代器，通过队列流式返回。
+
+    为什么用独立线程而不是直接在当前线程创建 loop：
+    - AsyncSqliteSaver / aiosqlite 在 __init__ 时记录事件循环引用
+    - Flask/Waitress 每个请求可能在不同线程
+    - 如果 checkpointer 的 loop 与迭代 loop 不同，aiosqlite 的 run_in_executor
+      返回的 Future 会绑定到错误的 loop，导致 hang
+    - 独立线程 + 独立 loop 确保 aiosqlite 操作在正确的 loop 上执行
+    """
+    import asyncio
+    import threading
+    from queue import Queue
+
+    queue: "Queue" = Queue()
+    _error: list = [None]  # 跨线程传递异常
+
+    async def _collect():
+        try:
+            async for item in async_gen:
+                queue.put(("value", item))
+            queue.put(("done", None))
+        except BaseException as e:
+            _error[0] = e
+            queue.put(("error", e))
+
+    def _run():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(_collect())
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+    while True:
+        kind, payload = queue.get()
+        if kind == "done":
+            break
+        if kind == "error":
+            raise RuntimeError(f"异步流内部错误: {payload}") from payload
+        yield payload
 
 
 def _format_sse(event: dict) -> str:
@@ -169,9 +185,13 @@ def chat_stream():
         config = {"configurable": {"thread_id": thread_id}}
         try:
             yield _format_sse({"type": "start", "thread_id": thread_id})
-            stream = agent.stream({"messages": [("user", user_message)]}, config=config)
-            for event in _sse_iter_events(stream):
-                yield _format_sse(event)
+            events = agent.astream_events(
+                {"messages": [("user", user_message)]},
+                config=config,
+                version="v2"
+            )
+            for sse_event in _sync_iter(_sse_iter_events(events)):
+                yield _format_sse(sse_event)
         except Exception as e:
             yield _format_sse({"type": "error", "error": str(e)})
             yield _format_sse({"done": True})
@@ -180,13 +200,57 @@ def chat_stream():
         stream_with_context(generate()),
         mimetype="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
             "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream; charset=utf-8",
         }
     )
 
 
-# ── 文件上传 API ──────────────────────────
+@app.route("/api/chat_with_file/stream", methods=["POST"])
+def chat_with_file_stream():
+    if agent is None:
+        return jsonify({"error": _AGENT_OFFLINE_MSG}), 503
+    data = request.get_json()
+    user_msg = _build_user_message(
+        data.get("message"),
+        data.get("file_path"),
+        data.get("file_type"),
+    )
+
+    if not user_msg or not user_msg.get("content"):
+        return jsonify({"error": "消息或文件不能为空"}), 400
+
+    thread_id = get_thread_id()
+
+    def generate():
+        agent_input, config = _build_input(user_msg, thread_id)
+        try:
+            yield _format_sse({"type": "start", "thread_id": thread_id})
+            events = agent.astream_events(
+                agent_input,
+                config=config,
+                version="v2"
+            )
+            for sse_event in _sync_iter(_sse_iter_events(events)):
+                yield _format_sse(sse_event)
+        except Exception as e:
+            yield _format_sse({"type": "error", "error": str(e)})
+            yield _format_sse({"done": True})
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream; charset=utf-8",
+        }
+    )
+
+
 @app.route("/api/upload", methods=["POST"])
 def upload_file():
     """上传 Excel / 图片文件，返回文件路径"""
@@ -216,35 +280,68 @@ def upload_file():
 
 
 # ── 文件消息预处理 helper（chat_with_file / chat_with_file_stream 共用）────
-def _build_user_message(text: str, file_path: str, file_type: str) -> str:
-    """把用户文字 + 附件路径合并成发给 LLM 的 user 消息。
+def _build_user_message(text: str, file_path: str, file_type: str) -> dict:
+    """把用户文字 + 附件路径合并成发给 LLM 的消息。
 
-    - 无附件 → 原样返回文字
-    - 已知类型（excel/image）→ 按类型给提示前缀或附件标签
-    - 未知类型 → 兜底用通用 [附带文件: ...] 标签
+    返回 {"is_multimodal": bool, "content": str|list}
+    - 非图片附件 / 纯文本: is_multimodal=False, content 为纯文本字符串
+    - 图片附件: is_multimodal=True, content 为多模态内容列表（含 base64 图片）
     """
     text = (text or "").strip()
     file_path = (file_path or "").strip()
     file_type = (file_type or "").strip()
 
     if not file_path:
-        return text
+        return {"is_multimodal": False, "content": text}
+
+    if file_type == "image":
+        # 读取图片并 base64 编码，构造多模态消息
+        ext = os.path.splitext(file_path)[1].lower()
+        mime_map = {
+            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".gif": "image/gif", ".bmp": "image/bmp",
+        }
+        mime_type = mime_map.get(ext, "image/png")
+
+        with open(file_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        content = []
+        if text:
+            content.append({"type": "text", "text": text})
+        else:
+            content.append({"type": "text", "text": "请识别这张图片中的内容，并执行相应的操作。"})
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime_type};base64,{img_b64}"},
+        })
+        return {"is_multimodal": True, "content": content}
 
     if file_type == "excel":
         prefix_hint = "请解析并导入这个 Excel 文件中的任务到 Jira。文件路径"
         tag = f"[附带 Excel 文件: {file_path}]"
-    elif file_type == "image":
-        prefix_hint = "请识别这张图片中的表格内容并创建对应的 Jira 任务。图片路径"
-        tag = f"[附带图片: {file_path}]"
-    else:
-        # 未知类型：兜底处理，不强加业务暗示
-        if text:
-            return f"[附带文件: {file_path}]\n{text}"
-        return f"请处理附件文件。文件路径: {file_path}"
+        if not text:
+            return {"is_multimodal": False, "content": f"{prefix_hint}: {file_path}"}
+        return {"is_multimodal": False, "content": f"{tag}\n{text}"}
 
-    if not text:
-        return f"{prefix_hint}: {file_path}"
-    return f"{tag}\n{text}"
+    # 未知类型：兜底处理
+    if text:
+        return {"is_multimodal": False, "content": f"[附带文件: {file_path}]\n{text}"}
+    return {"is_multimodal": False, "content": f"请处理附件文件。文件路径: {file_path}"}
+
+
+def _build_input(msg: dict, thread_id: str) -> tuple:
+    """根据消息类型构建传给 agent 的 input。
+
+    返回 (input_dict, config_dict)
+    - 多模态图片: 用 HumanMessage(content=list)
+    - 普通文本: 用 ("user", text) 元组
+    """
+    config = {"configurable": {"thread_id": thread_id}}
+    if msg["is_multimodal"]:
+        return ({"messages": [HumanMessage(content=msg["content"])]}, config)
+    else:
+        return ({"messages": [("user", msg["content"])]}, config)
 
 
 # ── 聊天中附带文件消息 ──────────────────
@@ -254,67 +351,26 @@ def chat_with_file():
         return jsonify({"error": _AGENT_OFFLINE_MSG}), 503
     """用户发送消息时附带文件路径，AI 自动处理"""
     data = request.get_json()
-    user_message = _build_user_message(
+    user_msg = _build_user_message(
         data.get("message"),
         data.get("file_path"),
         data.get("file_type"),
     )
 
-    if not user_message:
+    if not user_msg or not user_msg.get("content"):
         return jsonify({"error": "消息或文件不能为空"}), 400
 
     thread_id = get_thread_id()
-    config = {"configurable": {"thread_id": thread_id}}
+    agent_input, config = _build_input(user_msg, thread_id)
 
     try:
-        response = agent.invoke(
-            {"messages": [("user", user_message)]},
-            config=config
-        )
+        response = agent.invoke(agent_input, config=config)
         reply = ""
         if response and "messages" in response:
             reply = response["messages"][-1].content or ""
         return jsonify({"reply": reply, "thread_id": thread_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-# ── SSE 流式聊天 + 文件 ──────────────────
-@app.route("/api/chat_with_file/stream", methods=["POST"])
-def chat_with_file_stream():
-    if agent is None:
-        return jsonify({"error": _AGENT_OFFLINE_MSG}), 503
-    data = request.get_json()
-    user_message = _build_user_message(
-        data.get("message"),
-        data.get("file_path"),
-        data.get("file_type"),
-    )
-
-    if not user_message:
-        return jsonify({"error": "消息或文件不能为空"}), 400
-
-    thread_id = get_thread_id()
-
-    def generate():
-        config = {"configurable": {"thread_id": thread_id}}
-        try:
-            yield _format_sse({"type": "start", "thread_id": thread_id})
-            stream = agent.stream({"messages": [("user", user_message)]}, config=config)
-            for event in _sse_iter_events(stream):
-                yield _format_sse(event)
-        except Exception as e:
-            yield _format_sse({"type": "error", "error": str(e)})
-            yield _format_sse({"done": True})
-
-    return Response(
-        stream_with_context(generate()),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        }
-    )
 
 
 # ── 重置会话 ──────────────────────────

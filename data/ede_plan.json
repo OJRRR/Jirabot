@@ -1,38 +1,134 @@
 {
-  "_comment": "EDE 项目 DC 迁移计划 Task 的 Target 开始/结束日期。原 update_target_dates.py 与 update_target_dates_v2.py 都从这里读，避免双份维护。",
+  "_comment": "EDE 项目 DC 迁移计划 Task 的 Target 开始/结束日期。update_target_dates.py 从这里读取。",
   "_version": "2026-06-13",
   "tasks": {
-    "[PDC] Solution Confirm & Budget Release":              ["2026-04-01", "2026-06-01"],
-    "[PDC] Infra Requirements confirm":                     ["2026-05-01", "2026-06-01"],
-    "[PDC] procurement & contract execution":               ["2026-06-01", "2026-09-01"],
-    "[PDC] Data Center Build Out (4months)":                ["2026-09-01", "2027-01-01"],
-    "[PDC] wave 1 - Rack & Cabling Devices & PDU":          ["2027-01-01", "2027-03-01"],
-    "[PDC] wave 1 - Network Device Order & Delivery":       ["2026-07-01", "2027-01-01"],
-    "[PDC] wave 1 - Network Configuration":                 ["2027-01-01", "2027-03-01"],
-    "[PDC] wave 1 - Server & Storage Order & Delivery":     ["2026-07-01", "2027-01-01"],
-    "[PDC] wave 1 - Private Cloud Platform Implementation": ["2027-02-01", "2027-05-01"],
-    "[PDC] wave 1 - Bare Metal Implementation":             ["2027-02-01", "2027-04-01"],
-    "[PDC] wave 1 - Tool Platform Implementation":          ["2027-04-01", "2027-05-01"],
-    "[PDC] Infra Wave 1 Go-live":                           ["2027-05-01", "2027-05-01"],
-    "[PDC] wave 2 - Rack & Cabling Devices & PDU":          ["2027-06-01", "2027-08-01"],
-    "[PDC] wave 2 - Network Device Order & Delivery":       ["2026-12-01", "2027-06-01"],
-    "[PDC] wave 2 - Network Configuration":                 ["2027-06-01", "2027-08-01"],
-    "[PDC] wave 2 - Server & Storage Order & Delivery":     ["2026-12-01", "2027-04-01"],
-    "[PDC] wave 2 - Private Cloud Platform Implementation": ["2027-07-01", "2027-09-01"],
-    "[PDC] wave 2 - Bare Metal Implementation":             ["2027-07-01", "2027-09-01"],
-    "[PDC] wave 2 - Tool Platform Implementation":          ["2027-08-01", "2027-09-01"],
-    "[PDC] Infra Wave 2 Go-live":                           ["2027-09-01", "2027-09-01"],
-    "[DR] DR scope confirm":                                ["2027-03-01", "2028-01-01"],
-    "[DR] Budget Release":                                  ["2027-03-01", "2028-01-01"],
-    "[DR] Data Center Build Out (4 months)":                ["2027-10-01", "2028-02-01"],
-    "[DR] Rack & Cabling Devices & PDU":                    ["2028-02-01", "2028-03-01"],
-    "[DR] Network Device Order & Delivery":                 ["2027-10-01", "2028-02-01"],
-    "[DR] Network Configuration":                           ["2028-03-01", "2028-04-01"],
-    "[DR] Server & Storage Order & Delivery":               ["2027-10-01", "2028-04-01"],
-    "[DR] Private Cloud Platform Implementation":           ["2028-04-01", "2028-07-01"],
-    "[DR] Bare Metal Implementation":                       ["2028-04-01", "2028-06-01"],
-    "[DR] Tool Platform Implementation":                    ["2028-07-01", "2028-08-01"],
-    "[DR] DR Systems Deployment":                           ["2028-08-01", "2028-10-01"],
-    "[DR] Infra Go-live":                                   ["2028-10-01", "2028-10-01"]
+    "[PDC] Solution Confirm & Budget Release": [
+      "2026-04-01",
+      "2026-06-01"
+    ],
+    "[PDC] Infra Requirements confirm": [
+      "2026-05-01",
+      "2026-06-01"
+    ],
+    "[PDC] procurement & contract execution": [
+      "2026-06-01",
+      "2026-09-01"
+    ],
+    "[PDC] Data Center Build Out (4months)": [
+      "2026-09-01",
+      "2027-01-01"
+    ],
+    "[PDC] wave 1 - Rack & Cabling Devices & PDU": [
+      "2027-01-01",
+      "2027-03-01"
+    ],
+    "[PDC] wave 1 - Network Device Order & Delivery": [
+      "2026-07-01",
+      "2027-01-01"
+    ],
+    "[PDC] wave 1 - Network Configuration": [
+      "2027-01-01",
+      "2027-03-01"
+    ],
+    "[PDC] wave 1 - Server & Storage Order & Delivery": [
+      "2026-07-01",
+      "2027-01-01"
+    ],
+    "[PDC] wave 1 - Private Cloud Platform Implementation": [
+      "2027-02-01",
+      "2027-05-01"
+    ],
+    "[PDC] wave 1 - Bare Metal Implementation": [
+      "2027-02-01",
+      "2027-04-01"
+    ],
+    "[PDC] wave 1 - Tool Platform Implementation": [
+      "2027-04-01",
+      "2027-05-01"
+    ],
+    "[PDC] Infra Wave 1 Go-live": [
+      "2027-05-01",
+      "2027-05-01"
+    ],
+    "[PDC] wave 2 - Rack & Cabling Devices & PDU": [
+      "2027-06-01",
+      "2027-08-01"
+    ],
+    "[PDC] wave 2 - Network Device Order & Delivery": [
+      "2026-12-01",
+      "2027-06-01"
+    ],
+    "[PDC] wave 2 - Network Configuration": [
+      "2027-06-01",
+      "2027-08-01"
+    ],
+    "[PDC] wave 2 - Server & Storage Order & Delivery": [
+      "2026-12-01",
+      "2027-04-01"
+    ],
+    "[PDC] wave 2 - Private Cloud Platform Implementation": [
+      "2027-07-01",
+      "2027-09-01"
+    ],
+    "[PDC] wave 2 - Bare Metal Implementation": [
+      "2027-07-01",
+      "2027-09-01"
+    ],
+    "[PDC] wave 2 - Tool Platform Implementation": [
+      "2027-08-01",
+      "2027-09-01"
+    ],
+    "[PDC] Infra Wave 2 Go-live": [
+      "2027-09-01",
+      "2027-09-01"
+    ],
+    "[DR] DR scope confirm": [
+      "2027-03-01",
+      "2028-01-01"
+    ],
+    "[DR] Budget Release": [
+      "2027-03-01",
+      "2028-01-01"
+    ],
+    "[DR] Data Center Build Out (4 months)": [
+      "2027-10-01",
+      "2028-02-01"
+    ],
+    "[DR] Rack & Cabling Devices & PDU": [
+      "2028-02-01",
+      "2028-03-01"
+    ],
+    "[DR] Network Device Order & Delivery": [
+      "2027-10-01",
+      "2028-02-01"
+    ],
+    "[DR] Network Configuration": [
+      "2028-03-01",
+      "2028-04-01"
+    ],
+    "[DR] Server & Storage Order & Delivery": [
+      "2027-10-01",
+      "2028-04-01"
+    ],
+    "[DR] Private Cloud Platform Implementation": [
+      "2028-04-01",
+      "2028-07-01"
+    ],
+    "[DR] Bare Metal Implementation": [
+      "2028-04-01",
+      "2028-06-01"
+    ],
+    "[DR] Tool Platform Implementation": [
+      "2028-07-01",
+      "2028-08-01"
+    ],
+    "[DR] DR Systems Deployment": [
+      "2028-08-01",
+      "2028-10-01"
+    ],
+    "[DR] Infra Go-live": [
+      "2028-10-01",
+      "2028-10-01"
+    ]
   }
 }

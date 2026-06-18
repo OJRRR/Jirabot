@@ -119,10 +119,35 @@ if llm is not None:
         checkpointer = MemorySaver()
         print(f"💾 会话存储: MemorySaver（重启即丢失）")
     else:
-        # SqliteSaver 需要长期存活的 connection（from_conn_string 是 context manager，不能直接当 checkpointer）
-        _sqlite_conn = sqlite3.connect(_session_db_path, check_same_thread=False)
-        checkpointer = SqliteSaver(_sqlite_conn)
-        print(f"💾 会话存储: SqliteSaver → {_session_db_path}")
+        # 使用 AsyncSqliteSaver 同时支持 sync（agent.stream/invoke）和 async（agent.astream_events）
+        import asyncio
+
+        async def _make_async_saver(db_path: str):
+            """在事件循环中创建 AsyncSqliteSaver + aiosqlite 连接。
+
+            返回 (checkpointer, conn) — conn 需要保持存活以维持连接。
+            """
+            import aiosqlite
+            from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+            _conn = await aiosqlite.connect(db_path)
+            _saver = AsyncSqliteSaver(_conn)
+            await _saver.setup()
+            return _saver, _conn
+
+        _aio_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_aio_loop)
+        try:
+            checkpointer, _async_conn = _aio_loop.run_until_complete(
+                _make_async_saver(_session_db_path)
+            )
+        except Exception as _e:
+            import logging as _logging
+            _logging.getLogger("jira_bot").warning("AsyncSqliteSaver 初始化失败: %s", _e)
+            print(f"⚠️ AsyncSqliteSaver 初始化失败，回退到 SqliteSaver: {_e}")
+            _sqlite_conn = sqlite3.connect(_session_db_path, check_same_thread=False)
+            checkpointer = SqliteSaver(_sqlite_conn)
+        else:
+            print(f"💾 会话存储: AsyncSqliteSaver → {_session_db_path}")
 
     try:
         agent = create_react_agent(

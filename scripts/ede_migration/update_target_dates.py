@@ -1,6 +1,6 @@
 """为EDE项目所有Task填写Target start / Target end字段
 
-日期表从 data/ede_plan.json 读取（与 update_target_dates_v2.py 共享同一份数据）。
+日期表从 data/ede_plan.json 读取。
 用法：
     python scripts/ede_migration/update_target_dates.py            # 默认 dry-run
     python scripts/ede_migration/update_target_dates.py --apply    # 实际写入

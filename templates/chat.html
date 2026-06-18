@@ -145,43 +145,14 @@
         .message-bubble h2 { font-size: 15px; }
         .message-bubble h3 { font-size: 14px; }
 
-        /* Tool trace panel */
-        .stream-tools {
-            margin: 6px 0 10px;
-            padding: 8px 10px;
-            background: #F4F5F7;
-            border: 1px solid var(--jira-border);
-            border-radius: 4px;
-            font-size: 12px;
-            color: var(--jira-text-light);
-        }
-        .stream-tools .tool-item {
-            display: flex;
-            gap: 6px;
-            align-items: baseline;
-            padding: 3px 0;
-            border-bottom: 1px dashed var(--jira-border);
-        }
-        .stream-tools .tool-item:last-child { border-bottom: none; }
-        .stream-tools .tool-icon { flex-shrink: 0; }
-        .stream-tools .tool-args,
-        .stream-tools .tool-result {
-            font-family: 'SFMono-Medium', 'SF Mono', 'Consolas', monospace;
-            font-size: 11px;
-            color: var(--jira-text-muted);
-            word-break: break-all;
-        }
-        .stream-tools .tool-thinking { color: var(--jira-text-muted); font-style: italic; }
-
-        /* Thinking indicator */
-        .thinking-indicator { display: none; align-items: center; gap: 12px; padding: 0 32px 12px; }
-        .thinking-indicator.active { display: flex; }
-        .typing-dots { display: flex; gap: 4px; align-items: center; height: 36px; padding: 0 14px; background: #fff; border: 1px solid var(--jira-border); border-radius: 4px; box-shadow: var(--jira-shadow); }
+        /* Typing dots (inline in bubble) */
+        .typing-dots { display: flex; gap: 4px; align-items: center; height: 24px; }
         .typing-dots span { width: 8px; height: 8px; background: var(--jira-blue); border-radius: 50%; animation: typingBounce 1.2s infinite; }
         .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
         .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
         @keyframes typingBounce { 0%, 60%, 100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-4px); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
         /* File upload area */
         .input-area { padding: 12px 32px 20px; flex-shrink: 0; background: #fff; border-top: 1px solid var(--jira-border); }
@@ -311,10 +282,6 @@
 
     <div class="chat-area">
         <div class="messages-container" id="messages"></div>
-        <div class="thinking-indicator" id="thinking">
-            <div class="message-avatar ai">AI</div>
-            <div class="typing-dots"><span></span><span></span><span></span></div>
-        </div>
         <div class="input-area">
             <div class="input-wrapper"
                 ondragover="handleDragOver(event)"
@@ -383,7 +350,6 @@
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('input');
     const sendBtn = document.getElementById('sendBtn');
-    const thinkingEl = document.getElementById('thinking');
 
     // ── Autosize ──
     function autoResize(el) {
@@ -566,51 +532,56 @@
         div.className = 'message ai';
         const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
         const contentId = 'sc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-        const toolsId = 'st_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
         div.innerHTML = `
             <div class="message-avatar ai">AI</div>
             <div class="message-bubble">
                 <div class="message-label">PM小帮手</div>
-                <div id="${toolsId}" class="stream-tools" style="display:none;"></div>
-                <div id="${contentId}"></div>
+                <div id="${contentId}">
+                    <div class="stream-content"></div>
+                    <div class="stream-status">
+                        <div class="typing-dots"><span></span><span></span><span></span></div>
+                    </div>
+                </div>
                 <div class="message-time">${time}</div>
             </div>`;
         messagesEl.appendChild(div);
         scrollToBottom();
         return {
-            content: document.getElementById(contentId),
-            tools: document.getElementById(toolsId),
+            container: document.getElementById(contentId),
+            contentEl: document.getElementById(contentId).querySelector('.stream-content'),
+            statusEl: document.getElementById(contentId).querySelector('.stream-status'),
+            dotsEl: document.getElementById(contentId).querySelector('.typing-dots'),
         };
     }
 
-    // ── Tool trace ──
-    function appendToolTrace(panel, type, name, payload) {
-        if (!panel) return;
-        panel.style.display = 'block';
-        const item = document.createElement('div');
-        item.className = `tool-item tool-${type}`;
-
-        if (type === 'tool_call') {
-            const argsStr = (() => {
-                try {
-                    const s = JSON.stringify(payload || {});
-                    return s.length > 120 ? s.slice(0, 120) + '…' : s;
-                } catch (e) { return ''; }
-            })();
-            item.innerHTML = `<span class="tool-icon">🔧</span> 调用 <code>${name}</code> <span class="tool-args">${argsStr}</span>`;
-        } else if (type === 'tool_result') {
-            const ok = payload && payload.ok !== false;
-            const content = (payload && payload.content) || '';
-            const preview = content.length > 200 ? content.slice(0, 200) + '…' : content;
-            item.innerHTML = `<span class="tool-icon">${ok ? '✅' : '⚠️'}</span> <code>${name}</code> → <span class="tool-result">${preview}</span>`;
-        } else if (type === 'thinking') {
-            item.className = 'tool-item tool-thinking';
-            item.innerHTML = `<span class="tool-icon">💭</span> ${payload || ''}`;
-        } else {
-            return;
-        }
-        panel.appendChild(item);
+    /** Show tool execution status in the streaming message */
+    function showToolStatus(els, toolName) {
+        if (!els || !els.statusEl) return;
+        const friendlyName = toolName || '工具';
+        els.statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:6px;color:var(--jira-text-muted);font-size:13px;padding:4px 0;">
+            <span style="animation:spin 1s linear infinite;">⚙️</span> 正在执行 ${escapeHtml(friendlyName)}...
+        </div>`;
         scrollToBottom();
+    }
+
+    /** Restore typing dots (after tool finishes, waiting for next response) */
+    function showTypingDots(els) {
+        if (!els || !els.statusEl) return;
+        els.statusEl.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+    }
+
+    function escapeHtml(str) {
+        return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    /** Reset send/stop buttons to idle state */
+    function resetButtons() {
+        sendBtn.disabled = false;
+        sendBtn.style.display = '';
+        document.getElementById('stopBtn').style.display = 'none';
+        isSending = false;
+        abortController = null;
+        inputEl.focus();
     }
 
     // ── Send message (SSE with fallback) ──
@@ -638,14 +609,14 @@
         if (pendingFile) userMsg = `[📎 ${pendingFile.name}] ${text || '请处理此文件'}`;
         addMessage('user', userMsg);
 
-        thinkingEl.classList.add('active');
         sendBtn.disabled = true;
         sendBtn.style.display = 'none';
         document.getElementById('stopBtn').style.display = 'inline-flex';
         isSending = true;
 
-        const { content: contentEl, tools: toolsPanel } = addStreamingMessage();
+        const els = addStreamingMessage();
         let accumulated = '';
+        let reader = null;
 
         abortController = new AbortController();
 
@@ -671,10 +642,11 @@
                 throw new Error(errData.error || `HTTP ${resp.status}`);
             }
 
-            const reader = resp.body.getReader();
+            reader = resp.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
 
+            let streamEnded = false;
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
@@ -687,17 +659,15 @@
                     if (!line.startsWith('data: ')) continue;
                     try {
                         const data = JSON.parse(line.slice(6));
-                        if (data.done) break;
+                        if (data.done) { streamEnded = true; break; }
                         if (data.text) {
                             accumulated += data.text;
-                            contentEl.innerHTML = renderMarkdown(accumulated);
+                            // Hide status when we have text content
+                            if (els.statusEl) els.statusEl.innerHTML = '';
+                            els.contentEl.innerHTML = renderMarkdown(accumulated);
                             scrollToBottom();
-                        } else if (data.type === 'tool_call') {
-                            appendToolTrace(toolsPanel, 'tool_call', data.name, data.args);
-                        } else if (data.type === 'tool_result') {
-                            appendToolTrace(toolsPanel, 'tool_result', data.name, data);
-                        } else if (data.type === 'thinking') {
-                            appendToolTrace(toolsPanel, 'thinking', '', data.content);
+                        } else if (data.tool_call) {
+                            showToolStatus(els, data.tool_call);
                         } else if (data.type === 'error' || data.error) {
                             throw new Error(data.error || data.type);
                         }
@@ -705,17 +675,20 @@
                         if (e.message !== 'Unexpected end of JSON input') throw e;
                     }
                 }
+                if (streamEnded) break;
             }
+            // Clean up status indicator when stream ends naturally
+            if (els.statusEl) els.statusEl.innerHTML = '';
         } catch (err) {
             if (err.name === 'AbortError') {
-                // 用户主动停止，不做 fallback
-                contentEl.innerHTML += '<p style="color:var(--jira-text-muted);font-style:italic;margin-top:8px;">⏹️ 已停止生成</p>';
+                els.contentEl.innerHTML += '<p style="color:var(--jira-text-muted);font-style:italic;margin-top:8px;">⏹️ 已停止生成</p>';
+                if (els.statusEl) els.statusEl.innerHTML = '';
             } else {
-                // SSE failed → fallback to non-streaming
                 console.warn('SSE failed, falling back to non-streaming:', err);
+                if (els.statusEl) els.statusEl.innerHTML = '';
                 try {
                     const fallbackUrl = pendingFile ? '/api/chat_with_file' : '/api/chat';
-                    const body = pendingFile ? {
+                    const fbBody = pendingFile ? {
                         message: text,
                         file_path: pendingFile.path,
                         file_type: pendingFile.type
@@ -724,29 +697,26 @@
                     const resp = await fetch(fallbackUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(body)
+                        body: JSON.stringify(fbBody)
                     });
                     const data = await resp.json();
                     if (data.error) {
-                        contentEl.innerHTML = `<p>❌ ${data.error}</p>`;
+                        els.contentEl.innerHTML = `<p>❌ ${data.error}</p>`;
                     } else {
-                        contentEl.innerHTML = renderMarkdown(data.reply);
+                        els.contentEl.innerHTML = renderMarkdown(data.reply);
                     }
                 } catch (fallbackErr) {
-                    contentEl.innerHTML = `<p>❌ 网络错误: ${fallbackErr.message}</p>`;
+                    els.contentEl.innerHTML = `<p>❌ 网络错误: ${fallbackErr.message}</p>`;
                 }
             }
+        } finally {
+            // 无论成功/失败/停止，都必须恢复按钮状态
+            if (reader) {
+                try { reader.cancel(); } catch (_) {}
+            }
+            clearUpload();
+            resetButtons();
         }
-
-        // Cleanup
-        clearUpload();
-        thinkingEl.classList.remove('active');
-        sendBtn.disabled = false;
-        sendBtn.style.display = '';
-        document.getElementById('stopBtn').style.display = 'none';
-        isSending = false;
-        abortController = null;
-        inputEl.focus();
     }
 
     function stopStream() {

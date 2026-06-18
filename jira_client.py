@@ -1,4 +1,5 @@
 """Jira API 客户端封装（重构版 - 重试 + 速率限制）"""
+import os
 import time
 import logging
 from atlassian import Jira
@@ -13,7 +14,7 @@ class JiraClient:
 
     _instance = None
     _last_call_time = 0
-    _min_interval = 0.5  # 最小调用间隔（秒）
+    _min_interval = float(os.getenv("JIRA_MIN_INTERVAL", "0.1"))  # 最小调用间隔（秒），默认 0.1
     _offline = False     # True 表示初始化失败，处于离线模式
 
     def __new__(cls):
