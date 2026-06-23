@@ -11,6 +11,7 @@ from .constants import is_done, is_in_progress, is_high_priority, BLOCKS_KEYWORD
 from .risk_extractor import get_project_risks
 from .risk_render import render_risk_rows_html
 from ._lazy import LazyJira
+from ._decorators import json_tool
 
 _logger = logging.getLogger("jira_bot.report_tools")
 jira = LazyJira()
