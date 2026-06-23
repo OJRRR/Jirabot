@@ -10,6 +10,14 @@ agent, checkpointer, jira_client, llm = build_agent()
 
 
 def main():
+    if agent is None:
+        print("\n❌ Agent 未初始化（LLM/Jira 不可达）")
+        print("   请检查 .env 配置中的以下变量：")
+        print("   - JIRA_SERVER / JIRA_USER / JIRA_TOKEN")
+        print("   - MODEL_API_BASE / MODEL_API_KEY / MODEL_NAME")
+        print("   修改后重新运行 python main.py\n")
+        return
+
     print("\n" + "=" * 60)
     print("🤖 PM小帮手 启动成功！")
     print("=" * 60)
