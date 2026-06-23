@@ -1,59 +1,37 @@
-﻿@echo off
+@echo off
 chcp 65001 >nul
+echo ============================================
+echo   PM小帮手 启动脚本
+echo ============================================
+echo.
+echo 选择启动模式:
+echo   1. Web 界面 (python webapp.py)
+echo   2. CLI 命令行 (python main.py)
+echo   3. 运行测试 (pytest)
+echo   4. 测试 + 覆盖率报告 (pytest --cov)
+echo.
+set /p choice="请输入选项 (1/2/3/4): "
 
-title PM小帮手 / Jira Bot
-
-:menu
-cls
-echo ========================================
-echo   PM小帮手（Jira Bot）
-echo ========================================
-echo.
-echo 请选择启动模式：
-echo.
-echo   [1] CLI 后台模式
-echo   [2] Web 网页服务
-echo   [Q] 退出
-echo.
-set /p choice="输入 1, 2 或 Q: "
-if "%choice%"=="1" goto cli
-if "%choice%"=="2" goto web
-if /i "%choice%"=="q" goto end
-goto menu
-
-:cli
-cls
-echo ========================================
-echo   CLI 模式 - PM小帮手
-echo ========================================
-echo.
-python main.py
-if %errorlevel% neq 0 (
+if "%choice%"=="1" (
     echo.
-    echo ! 运行失败，请确保已安装 Python 并安装依赖: pip install -r requirements.txt
+    echo 🌐 启动 Web 界面...
+    python webapp.py
+) else if "%choice%"=="2" (
     echo.
-    pause
+    echo 🤖 启动 CLI 命令行...
+    python main.py
+) else if "%choice%"=="3" (
+    echo.
+    echo 🧪 运行测试...
+    python -m pytest tests/ -v
+) else if "%choice%"=="4" (
+    echo.
+    echo 📊 运行测试 + 覆盖率报告...
+    python -m pytest tests/ -v --cov=. --cov-report=term-missing --cov-report=html
+    echo.
+    echo ✅ HTML 报告已生成: htmlcov\index.html
+) else (
+    echo ❌ 无效选项，请输入 1/2/3/4
 )
-goto menu
 
-:web
-cls
-echo ========================================
-echo   Web 模式 - PM小帮手
-echo ========================================
-echo.
-echo 访问地址: http://127.0.0.1:5000
-echo.
-python webapp.py
-if %errorlevel% neq 0 (
-    echo.
-    echo ! 运行失败，请确保已安装 Python 并安装依赖: pip install -r requirements.txt
-    echo.
-    pause
-)
-goto menu
-
-:end
-echo.
-echo 再见！
-timeout /t 2 /nobreak >nul
+pause
