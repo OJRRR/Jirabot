@@ -244,7 +244,7 @@ def generate_portfolio_report() -> str:
                     "risks": risks,
                     "overdue": overdue_count,
                 }
-            except Exception as e:
+            except (ValueError, RuntimeError) as e:
                 return {"key": proj_key, "error": str(e)}
 
         # 并行查询各项目

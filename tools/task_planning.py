@@ -44,7 +44,7 @@ def analyze_meeting_for_projects(meeting_notes: str = "",
                  "status": e.get("fields", {}).get("status", {}).get("name", "")}
                 for e in epics[:20]
             ]
-        except Exception:
+        except (ValueError, RuntimeError):
             context["existing_epics"] = []
 
         # 获取项目最近的 Task
@@ -54,7 +54,7 @@ def analyze_meeting_for_projects(meeting_notes: str = "",
                 f'ORDER BY created DESC')
             tasks = fetch_all_issues(jira, jql)
             context["recent_tasks"] = [build_task_dict(t) for t in tasks[:20]]
-        except Exception:
+        except (ValueError, RuntimeError):
             context["recent_tasks"] = []
     else:
         context["project_metadata"] = None

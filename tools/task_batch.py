@@ -88,7 +88,7 @@ def batch_create_issues(issues_json: str = "") -> dict:
                             {"index": meta["index"],
                              "error": f"批量创建返回异常: {created}",
                              "summary": meta["summary"]})
-            except Exception as be:
+            except (ValueError, TypeError, RuntimeError) as be:
                 for meta in batch_meta:
                     errors.append(
                         {"index": meta["index"], "error": str(be),
@@ -285,7 +285,7 @@ def import_from_excel(file_path: str = "", project_key: str = "",
                                     {"index": meta["index"],
                                      "error": str(issue_result),
                                      "summary": meta["summary"]})
-            except Exception as be:
+            except (ValueError, TypeError, RuntimeError) as be:
                 for meta in batch_meta:
                     errors.append(
                         {"index": meta["index"], "error": str(be),

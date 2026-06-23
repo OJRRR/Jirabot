@@ -43,7 +43,7 @@ def _get_required_fields(project_key: str, issue_type: str) -> list:
         for it in meta["data"]["issue_types"]:
             if it.get("name", "").lower() == issue_type.lower():
                 return [f.get("name", "") for f in it.get("required_fields", [])]
-    except (json.JSONDecodeError, KeyError):
+    except (json.JSONDecodeError, KeyError, TypeError):
         pass
     return None
 

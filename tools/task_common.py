@@ -122,7 +122,7 @@ def _resolve_fields_via_meta(additional_fields: dict, project_key: str) -> dict:
                     _logger.warning("无法映射字段 %s (值=%s)，项目 %s 元数据中未找到",
                                     k, v, project_key)
             return processed
-    except Exception as e:
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as e:
         _logger.warning("通过元数据解析字段失败: %s，回退全局别名", e)
     return process_additional_fields(additional_fields)
 
