@@ -346,6 +346,7 @@
     let pendingFile = null;     // { path, name, type }
     let isEditMode = false;
     let abortController = null; // 用于中断 SSE 流
+    let activeReader = null;    // 用于强制中断 reader.read()
 
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('input');
@@ -643,6 +644,7 @@
             }
 
             reader = resp.body.getReader();
+            activeReader = reader;
             const decoder = new TextDecoder();
             let buffer = '';
 
@@ -680,7 +682,8 @@
             // Clean up status indicator when stream ends naturally
             if (els.statusEl) els.statusEl.innerHTML = '';
         } catch (err) {
-            if (err.name === 'AbortError') {
+            // 用户主动停止（AbortController.abort 或 reader.cancel）
+            if (err.name === 'AbortError' || err.name === 'TypeError') {
                 els.contentEl.innerHTML += '<p style="color:var(--jira-text-muted);font-style:italic;margin-top:8px;">⏹️ 已停止生成</p>';
                 if (els.statusEl) els.statusEl.innerHTML = '';
             } else {
@@ -714,15 +717,23 @@
             if (reader) {
                 try { reader.cancel(); } catch (_) {}
             }
+            activeReader = null;
             clearUpload();
             resetButtons();
         }
     }
 
     function stopStream() {
+        // 同时中断 AbortController（用于未发出的请求）和活跃的 reader（用于正在读取的流）
         if (abortController) {
             abortController.abort();
             abortController = null;
+        }
+        if (activeReader) {
+            try {
+                activeReader.cancel();
+            } catch (_) {}
+            activeReader = null;
         }
     }
 
@@ -848,10 +859,8 @@
     async function resetChat() {
         if (!confirm('确定要清空当前对话吗？')) return;
         await fetch('/api/reset', { method: 'POST' });
-        messagesEl.innerHTML = '';
-        clearUpload();
-        addWelcomeMessage();
-        inputEl.focus();
+        // 刷新页面，index 路由会分配新的 thread_id
+        window.location.reload();
     }
 
     // ── Welcome ──

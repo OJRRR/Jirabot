@@ -30,6 +30,7 @@ class JiraConfig:
     TOKEN    = os.getenv("JIRA_TOKEN")
     TARGET_START_FIELD = os.getenv("TARGET_START_FIELD", "customfield_16519")
     TARGET_END_FIELD   = os.getenv("TARGET_END_FIELD",   "customfield_16520")
+    EPIC_NAME_FIELD_ID = os.getenv("EPIC_NAME_FIELD_ID")
     EPIC_LINK_FIELD_ID = os.getenv("EPIC_LINK_FIELD_ID")
 
 
@@ -40,6 +41,7 @@ class PathConfig:
     TEMPLATE_DIR = os.path.join(_BASE_DIR, "templates")
     LOG_DIR      = os.path.join(_BASE_DIR, "logs")
     LOG_FILE     = os.path.join(LOG_DIR, "jira_bot.log")
+    LOG_LEVEL    = os.getenv("LOG_LEVEL", "INFO").upper()
     UPLOAD_DIR   = os.path.join(_BASE_DIR, "uploads")
 
     # 启动时自动创建必要目录
@@ -109,18 +111,32 @@ class ProjectConfig:
         return base_jql
 
 
-# ── 统一入口（向后兼容）───────────────────────────────────────
+# ── 统一入口（动态委托，不再静态复制）───────────────────────
 
-class Config:
+class _ConfigMeta(type):
+    """元类：让 Config.TARGET_START_FIELD 等类属性访问动态委托给子配置类。
+    解决了旧代码在模块加载时复制值、后续 JiraConfig 更新无法反映的问题。
+    """
+    _delegates = {
+        "TARGET_START_FIELD":  lambda: JiraConfig.TARGET_START_FIELD,
+        "TARGET_END_FIELD":    lambda: JiraConfig.TARGET_END_FIELD,
+        "EPIC_NAME_FIELD_ID":  lambda: JiraConfig.EPIC_NAME_FIELD_ID,
+        "EPIC_LINK_FIELD_ID":  lambda: JiraConfig.EPIC_LINK_FIELD_ID,
+    }
+
+    def __getattr__(cls, name):
+        if name in cls._delegates:
+            return cls._delegates[name]()
+        raise AttributeError(f"type object 'Config' has no attribute {name!r}")
+
+
+class Config(metaclass=_ConfigMeta):
     """全局配置入口 — 委托给子配置类，保持旧属性名兼容"""
 
     # ── Jira ──
     JIRA_SERVER         = JiraConfig.SERVER
     JIRA_USER           = JiraConfig.USER
     JIRA_TOKEN          = JiraConfig.TOKEN
-    TARGET_START_FIELD  = JiraConfig.TARGET_START_FIELD
-    TARGET_END_FIELD    = JiraConfig.TARGET_END_FIELD
-    EPIC_LINK_FIELD_ID  = JiraConfig.EPIC_LINK_FIELD_ID
 
     # ── 目录 ──
     BASE_DIR     = PathConfig.BASE_DIR
@@ -128,6 +144,7 @@ class Config:
     TEMPLATE_DIR = PathConfig.TEMPLATE_DIR
     LOG_DIR      = PathConfig.LOG_DIR
     LOG_FILE     = PathConfig.LOG_FILE
+    LOG_LEVEL    = PathConfig.LOG_LEVEL
     UPLOAD_DIR   = PathConfig.UPLOAD_DIR
 
     # ── 模型 ──
@@ -200,7 +217,38 @@ class Config:
         print(f"📂 模板目录: {cls.TEMPLATE_DIR}")
         print(f"📂 日志文件: {cls.LOG_FILE}")
         print(f"📅 自定义字段: 开始={cls.TARGET_START_FIELD}, 结束={cls.TARGET_END_FIELD}")
+        if cls.EPIC_NAME_FIELD_ID:
+            print(f"🏷  Epic Name字段: {cls.EPIC_NAME_FIELD_ID}")
         if cls.EPIC_LINK_FIELD_ID:
             print(f"🔗 Epic Link字段: {cls.EPIC_LINK_FIELD_ID}")
         print(f"📊 查询限制: 单次最多 {cls.MAX_TASKS_PER_TOOL} 条")
         print(f"🗑  报告保留: {cls.REPORT_MAX_AGE_DAYS} 天")
+
+
+# ── 模块加载后自动确保 Epic 字段已探测 ──────────────────────────
+# 在 config.py 被 import 完成后，如果 EPIC_NAME_FIELD_ID / EPIC_LINK_FIELD_ID
+# 未在环境变量中配置，则通过 LazyFieldDetector 按需探测（单例 + 缓存）。
+# 这样无论从 main.py、webapp.py 还是直接 import 工具模块进入，都能自动探测。
+
+def _ensure_epic_fields():
+    """模块加载后自动探测 Epic 字段（仅当未配置时触发，探测结果写入 .env）。"""
+    try:
+        # 延迟导入避免循环依赖
+        from field_detector import LazyFieldDetector
+        detector = LazyFieldDetector()
+
+        for attr_name in ("EPIC_NAME_FIELD_ID", "EPIC_LINK_FIELD_ID"):
+            current = getattr(JiraConfig, attr_name, None)
+            if current:
+                continue  # 已配置，跳过
+            val = detector.get(attr_name)
+            if val:
+                # 更新 JiraConfig 类属性（Config 通过 @property 自动反映变更）
+                setattr(JiraConfig, attr_name, val)
+                # 写入 os.environ 供其他模块直接 os.getenv() 读取
+                os.environ[attr_name] = val
+    except Exception:
+        pass  # 探测失败不阻塞启动
+
+
+_ensure_epic_fields()

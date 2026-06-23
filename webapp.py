@@ -70,6 +70,7 @@ def index():
 
 # ── 普通聊天 API（非流式）─────────────────
 @app.route("/api/chat", methods=["POST"])
+@limiter.limit("10 per minute")
 def chat():
     if agent is None:
         return jsonify({"error": _AGENT_OFFLINE_MSG}), 503
@@ -134,6 +135,10 @@ async def _sse_iter_events(stream_iter):
     yield {"done": True}
 
 
+# ── 流式响应超时（秒）──
+_STREAM_TIMEOUT = int(os.getenv("WEB_STREAM_TIMEOUT", "120"))
+
+
 def _sync_iter(async_gen):
     """在独立线程的事件循环中运行异步迭代器，通过队列流式返回。
 
@@ -186,6 +191,7 @@ def _format_sse(event: dict) -> str:
 
 
 @app.route("/api/chat/stream", methods=["POST"])
+@limiter.limit("10 per minute")
 def chat_stream():
     if agent is None:
         return jsonify({"error": _AGENT_OFFLINE_MSG}), 503
@@ -197,7 +203,12 @@ def chat_stream():
     thread_id = get_thread_id()
 
     def generate():
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {
+            "configurable": {
+                "thread_id": thread_id,
+                "timeout": _STREAM_TIMEOUT,
+            }
+        }
         try:
             yield _format_sse({"type": "start", "thread_id": thread_id})
             events = agent.astream_events(
@@ -411,6 +422,16 @@ def reset_conversation():
 def serve_report(filename):
     from flask import send_from_directory
     return send_from_directory(Config.REPORTS_DIR, filename)
+
+
+@app.route("/health")
+def health():
+    """健康检查端点"""
+    return jsonify({
+        "status": "ok",
+        "agent": agent is not None,
+        "jira": not jira_client.is_offline if jira_client else False,
+    })
 
 
 if __name__ == "__main__":

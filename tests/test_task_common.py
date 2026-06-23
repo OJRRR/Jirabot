@@ -90,7 +90,7 @@ class TestBuildIssueFields:
     def test_with_description(self):
         fields, err = build_issue_fields("KO", "test", "Task", description="详情")
         assert err is None
-        assert fields["description"]["content"][0]["content"][0]["text"] == "详情"
+        assert fields["description"] == "详情"
 
     def test_with_parent(self):
         fields, err = build_issue_fields("KO", "subtask", "Sub-task", parent_key="KO-100")

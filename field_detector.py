@@ -37,6 +37,99 @@ def _match_any(name: str, patterns: list) -> bool:
     return any(_normalize(p) in n for p in patterns)
 
 
+# ── LazyFieldDetector: Epic Name / Epic Link 按需探测 ──────────────────
+
+class LazyFieldDetector:
+    """按需探测 Jira 自定义字段 ID（单例 + 缓存）。
+
+    供 config.py 的 _ensure_epic_fields() 调用，支持：
+    - EPIC_NAME_FIELD_ID: 名称含 "epic name" 的 customfield
+    - EPIC_LINK_FIELD_ID: 名称含 "epic link" 的 customfield
+    """
+
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._cache = {}
+            cls._instance._fields_loaded = False
+        return cls._instance
+
+    def _load_fields(self):
+        """从 Jira 加载全部字段列表并缓存。
+
+        注意：首次导入时存在循环依赖（field_detector → jira_client → config → field_detector），
+        ImportError 会被捕获并延迟到下次调用重试，不标记 _fields_loaded 以允许后续重试。
+        """
+        if self._fields_loaded:
+            return
+        try:
+            from jira_client import JiraClient
+        except ImportError as e:
+            # 循环导入期间 JiraClient 尚未就绪，下次 get() 调用时重试
+            _logger.debug("JiraClient 导入延迟（循环导入中）: %s", e)
+            return
+        try:
+            client = JiraClient()
+            if client.is_offline:
+                _logger.warning("Jira 离线，跳过 Epic 字段探测")
+                self._fields_loaded = True
+                return
+            fields = client.get_all_fields()
+            if not isinstance(fields, list):
+                self._fields_loaded = True
+                return
+            for f in fields:
+                if not isinstance(f, dict):
+                    continue
+                fid = f.get("id") or ""
+                name = f.get("name") or ""
+                if not fid.startswith("customfield_"):
+                    continue
+                self._cache[name.strip().lower()] = fid
+            _logger.info("Epic 字段探测完成: %d 个字段已缓存", len(self._cache))
+        except Exception as e:
+            _logger.warning("Epic 字段探测失败: %s", e)
+        finally:
+            self._fields_loaded = True
+
+    def get(self, attr_name: str) -> str:
+        """获取指定属性的 customfield ID。
+
+        :param attr_name: "EPIC_NAME_FIELD_ID" 或 "EPIC_LINK_FIELD_ID"
+        :return: customfield ID 字符串，未找到返回 None
+        """
+        self._load_fields()
+        if not self._cache:
+            return None
+
+        if attr_name == "EPIC_NAME_FIELD_ID":
+            # 匹配 "epic name" — 优先精确匹配
+            for name, fid in self._cache.items():
+                if name == "epic name":
+                    _logger.info("Epic Name 字段探测: %s", fid)
+                    return fid
+            # 模糊匹配
+            for name, fid in self._cache.items():
+                if "epic name" in name:
+                    _logger.info("Epic Name 字段探测(fuzzy): %s → %s", name, fid)
+                    return fid
+        elif attr_name == "EPIC_LINK_FIELD_ID":
+            for name, fid in self._cache.items():
+                if name == "epic link":
+                    _logger.info("Epic Link 字段探测: %s", fid)
+                    return fid
+            for name, fid in self._cache.items():
+                if "epic link" in name:
+                    _logger.info("Epic Link 字段探测(fuzzy): %s → %s", name, fid)
+                    return fid
+        return None
+
+
+# ── 原有的 Target Start/End 探测函数 ──────────────────────────────────
+
+
 def detect_target_fields(jira_client) -> Dict[str, Optional[str]]:
     """
     调用 Jira REST API 列出全部字段，返回 {"start": "customfield_xxx" or None, "end": ...}.
