@@ -1,173 +1,13 @@
 # -*- coding: utf-8 -*-
-"""PM小帮手 主入口"""
+"""PM小帮手 CLI 主入口"""
 import os
-import sqlite3
 import uuid
 from config import Config
-from jira_client import JiraClient
-from utils import configure_console_encoding, setup_logging
+from agent_factory import build_agent
 
-configure_console_encoding()
-from tools import (
-    get_my_tasks,
-    get_project_tasks,
-    generate_report,
-    generate_portfolio_report,
-    get_issue_links,
-    get_task_dependencies,
-    extract_issue_risks,
-    create_issue,
-    get_create_issue_metadata,
-    create_issue_link,
-    get_issue_transitions,
-    update_issue,
-    add_issue_comment,
-    add_issue_worklog,
-    batch_create_issues,
-    search_issues,
-    assign_issue,
-    delete_issue,
-    batch_delete_issues,
-    import_from_excel,
-    batch_update_dates,
-    batch_update_issues,
-    suggest_epic_tasks,
-    analyze_meeting_for_projects,
-)
+# 初始化 Agent（与 webapp.py 共享同一套构建逻辑）
+agent, checkpointer, jira_client, llm = build_agent()
 
-from langchain_openai import ChatOpenAI
-from langgraph.prebuilt import create_react_agent
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.checkpoint.memory import MemorySaver
-
-# 初始化日志（文件 + 控制台，带轮转）
-setup_logging(Config.LOG_FILE)
-
-# 打印配置
-Config.print_info()
-
-# 初始化 Jira 客户端
-jira_client = JiraClient()
-jira = jira_client.get_client()
-
-# 启动时尝试自动探测 "Target Start" / "Target End" 字段 ID（环境变量 AUTO_DETECT_FIELDS=0 可关闭）
-if os.getenv("AUTO_DETECT_FIELDS", "1") == "1" and not jira_client.is_offline:
-    try:
-        from field_detector import ensure_target_field_ids
-        ensure_target_field_ids(jira_client)
-    except Exception as _e:
-        import logging as _logging
-        _logging.getLogger("jira_bot").warning("字段自动探测失败: %s", _e)
-
-# ── 创建 LLM（支持任何 OpenAI 兼容 API，含视觉模型）─
-llm = None
-agent = None
-
-try:
-    llm = ChatOpenAI(
-        model=Config.MODEL_NAME,
-        api_key=Config.MODEL_API_KEY,
-        base_url=Config.MODEL_API_BASE,
-        temperature=Config.AI_TEMPERATURE,
-        max_tokens=4096,
-    )
-    print(f"🤖 模型: {Config.MODEL_NAME}")
-    print(f"🔗 API: {Config.MODEL_API_BASE}")
-except Exception as _e:
-    import logging as _logging
-    _logging.getLogger("jira_bot").warning("LLM 初始化失败（离线模式）: %s", _e)
-
-# 工具列表
-tools = [
-    get_my_tasks,
-    get_project_tasks,
-    generate_report,
-    generate_portfolio_report,
-    get_issue_links,
-    get_task_dependencies,
-    extract_issue_risks,
-    create_issue,
-    get_create_issue_metadata,
-    create_issue_link,
-    get_issue_transitions,
-    update_issue,
-    add_issue_comment,
-    add_issue_worklog,
-    batch_create_issues,
-    search_issues,
-    assign_issue,
-    delete_issue,
-    batch_delete_issues,
-    import_from_excel,
-    batch_update_dates,
-    batch_update_issues,
-    suggest_epic_tasks,
-    analyze_meeting_for_projects,
-]
-
-if llm is not None:
-    from prompts import SYSTEM_PROMPT_TEMPLATE
-
-    # 系统提示词
-    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-        target_projects=Config.TARGET_PROJECTS if Config.TARGET_PROJECTS else '所有项目'
-    )
-
-    # 创建 Agent
-    # 会话存储：默认用 SQLite 落盘到 BASE_DIR/sessions.db，重启不丢会话
-    # 设置环境变量 JIRA_SESSION_BACKEND=memory 可回退到纯内存（多进程调试时方便）
-    _session_backend = os.getenv("JIRA_SESSION_BACKEND", "sqlite").lower()
-    _sessions_dir = os.path.join(Config.BASE_DIR, "sessions")
-    os.makedirs(_sessions_dir, exist_ok=True)
-    _session_db_path = os.path.join(_sessions_dir, "sessions.db")
-
-    if _session_backend == "memory":
-        checkpointer = MemorySaver()
-        print(f"💾 会话存储: MemorySaver（重启即丢失）")
-    else:
-        # 使用 AsyncSqliteSaver 同时支持 sync（agent.stream/invoke）和 async（agent.astream_events）
-        import asyncio
-
-        async def _make_async_saver(db_path: str):
-            """在事件循环中创建 AsyncSqliteSaver + aiosqlite 连接。
-
-            返回 (checkpointer, conn) — conn 需要保持存活以维持连接。
-            """
-            import aiosqlite
-            from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-            _conn = await aiosqlite.connect(db_path)
-            _saver = AsyncSqliteSaver(_conn)
-            await _saver.setup()
-            return _saver, _conn
-
-        _aio_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(_aio_loop)
-        try:
-            checkpointer, _async_conn = _aio_loop.run_until_complete(
-                _make_async_saver(_session_db_path)
-            )
-        except Exception as _e:
-            import logging as _logging
-            _logging.getLogger("jira_bot").warning("AsyncSqliteSaver 初始化失败: %s", _e)
-            print(f"⚠️ AsyncSqliteSaver 初始化失败，回退到 SqliteSaver: {_e}")
-            _sqlite_conn = sqlite3.connect(_session_db_path, check_same_thread=False)
-            checkpointer = SqliteSaver(_sqlite_conn)
-        else:
-            print(f"💾 会话存储: AsyncSqliteSaver → {_session_db_path}")
-
-    try:
-        agent = create_react_agent(
-            model=llm,
-            tools=tools,
-            prompt=system_prompt,
-            checkpointer=checkpointer
-        )
-        print("✅ Agent 初始化成功")
-    except Exception as _e:
-        import logging as _logging
-        _logging.getLogger("jira_bot").warning("Agent 初始化失败: %s", _e)
-else:
-    print("⚠️ LLM 未初始化，Agent 不可用（离线模式）")
 
 def main():
     print("\n" + "=" * 60)
@@ -215,6 +55,7 @@ def main():
             break
         except Exception as e:
             print(f"\n❌ 错误：{e}\n")
+
 
 if __name__ == "__main__":
     main()

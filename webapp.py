@@ -12,7 +12,10 @@ from utils import configure_console_encoding, setup_logging
 
 configure_console_encoding()
 
-from main import agent
+from agent_factory import build_agent
+
+# 模块级初始化 Agent（与 CLI 共用同一套构建逻辑）
+agent, _checkpointer, _jira_client, _llm = build_agent()
 from langchain_core.messages import HumanMessage
 
 # 离线模式提示（agent 为 None 时，聊天 API 不可用）
@@ -42,6 +45,16 @@ ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".gif", ".bmp"}
 
 
 def get_thread_id():
+    """获取当前会话的 thread_id，如果不存在则自动创建。
+
+    thread_id 的生命周期：
+    - 首次访问首页 → 自动创建新的 thread_id
+    - 每次刷新页面 → 首页重新分配新的 thread_id（新对话）
+    - 同一页面内多次聊天 → 共用同一个 thread_id（多轮对话）
+
+    这样设计是为了让「刷新 = 新对话」成为默认行为，
+    避免用户刷新后 AI 还带着上个会话的历史上下文。
+    """
     if "thread_id" not in session:
         session["thread_id"] = f"web_{uuid.uuid4().hex[:8]}"
     return session["thread_id"]
@@ -50,6 +63,8 @@ def get_thread_id():
 # ── 首页 ──────────────────────────────────
 @app.route("/")
 def index():
+    # 每次加载首页都分配新的 thread_id，确保刷新页面 = 新对话
+    session["thread_id"] = f"web_{uuid.uuid4().hex[:8]}"
     return render_template("chat.html")
 
 
@@ -191,7 +206,14 @@ def chat_stream():
                 version="v2"
             )
             for sse_event in _sync_iter(_sse_iter_events(events)):
+                # 客户端断开时立即停止生成，避免资源浪费
+                # Flask dev server 的 request 没有 is_disconnected，用 hasattr 保护
+                if getattr(request, 'is_disconnected', lambda: False)():
+                    break
                 yield _format_sse(sse_event)
+        except GeneratorExit:
+            # 客户端断开时 Flask 会关闭生成器
+            pass
         except Exception as e:
             yield _format_sse({"type": "error", "error": str(e)})
             yield _format_sse({"done": True})
@@ -234,7 +256,11 @@ def chat_with_file_stream():
                 version="v2"
             )
             for sse_event in _sync_iter(_sse_iter_events(events)):
+                if getattr(request, 'is_disconnected', lambda: False)():
+                    break
                 yield _format_sse(sse_event)
+        except GeneratorExit:
+            pass
         except Exception as e:
             yield _format_sse({"type": "error", "error": str(e)})
             yield _format_sse({"done": True})

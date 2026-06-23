@@ -4,24 +4,31 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tools.task_tools import (
+from tools.task_query import (
     get_my_tasks,
     get_project_tasks,
     search_issues,
     get_create_issue_metadata,
+    get_issue_transitions,
+    suggest_epic_tasks,
+)
+from tools.task_crud import (
     create_issue,
     create_issue_link,
-    get_issue_transitions,
     update_issue,
     add_issue_comment,
     add_issue_worklog,
-    batch_create_issues,
     assign_issue,
     delete_issue,
+)
+from tools.task_batch import (
+    batch_create_issues,
+    batch_delete_issues,
     import_from_excel,
     batch_update_dates,
     batch_update_issues,
-    suggest_epic_tasks,
+)
+from tools.task_planning import (
     analyze_meeting_for_projects,
 )
 
@@ -142,6 +149,12 @@ class TestCreateIssue:
         result = create_issue.invoke({"project_key": "KO"})
         assert "失败" in result
 
+    def test_missing_issue_type(self):
+        """缺少 issue_type 时应报错"""
+        result = create_issue.invoke({"project_key": "KO", "summary": "测试"})
+        assert "失败" in result
+        assert "issue_type" in result.lower()
+
     def test_create_success(self):
         with patch("tools.task_tools.jira") as mock_jira:
             mock_jira.create_issue.return_value = {"key": "KO-100"}
@@ -163,6 +176,106 @@ class TestCreateIssue:
                 "description": "这是描述",
             })
             assert "成功" in result
+
+    # ── Epic 创建专项测试 ──
+
+    def test_create_epic_success(self):
+        """创建 Epic 类型任务 — 成功路径"""
+        with patch("tools.task_tools.jira") as mock_jira:
+            mock_jira.create_issue.return_value = {"key": "KO-200"}
+            result = create_issue.invoke({
+                "project_key": "KO",
+                "summary": "用户登录模块",
+                "issue_type": "Epic",
+                "description": "实现完整的用户登录功能",
+            })
+            assert "成功" in result
+            assert "KO-200" in result
+
+    def test_create_epic_without_epic_name_field(self):
+        """EPIC_NAME_FIELD_ID 未配置时也能创建 Epic（只是不带 Epic Name 字段）"""
+        with patch("tools.task_tools.jira") as mock_jira:
+            with patch("tools.task_common.Config.EPIC_NAME_FIELD_ID", None):
+                mock_jira.create_issue.return_value = {"key": "KO-300"}
+                result = create_issue.invoke({
+                    "project_key": "KO",
+                    "summary": "测试Epic",
+                    "issue_type": "Epic",
+                })
+                assert "成功" in result
+                assert "KO-300" in result
+
+    def test_create_epic_with_target_dates(self):
+        """创建 Epic 并附带 Target Start/End 日期"""
+        with patch("tools.task_tools.jira") as mock_jira:
+            mock_jira.create_issue.return_value = {"key": "KO-400"}
+            result = create_issue.invoke({
+                "project_key": "KO",
+                "summary": "带日期的Epic",
+                "issue_type": "Epic",
+                "additional_fields": {
+                    "Target start": "2026-07-01",
+                    "Target end": "2026-08-15",
+                },
+            })
+            assert "成功" in result
+            assert "KO-400" in result
+
+    def test_create_epic_with_parent_ignored(self):
+        """Epic 不应有 parent_key，但传入时不应报错（Jira API 会处理）"""
+        with patch("tools.task_tools.jira") as mock_jira:
+            mock_jira.create_issue.return_value = {"key": "KO-500"}
+            result = create_issue.invoke({
+                "project_key": "KO",
+                "summary": "Epic不应该有父任务",
+                "issue_type": "Epic",
+                "parent_key": "KO-1",
+            })
+            # 传入 parent_key 不会在 build_issue_fields 层面被拦截
+            assert "成功" in result
+
+    def test_create_epic_hierarchy_rules(self):
+        """验证 Epic → Task → Sub-task 层级规则：
+        - Epic 可以直接关联 Task（通过 epic_link_key）
+        - Epic 不能直接关联 Sub-task（应被拒绝）
+        """
+        # 测试 Epic → Sub-task 应被拒绝
+        result = create_issue.invoke({
+            "project_key": "KO",
+            "summary": "Sub-task 不能直接关联 Epic",
+            "issue_type": "Sub-task",
+            "epic_link_key": "KO-100",
+        })
+        assert "失败" in result
+        assert "Epic" in result
+
+    def test_create_task_linked_to_epic(self):
+        """创建 Task 并关联到 Epic"""
+        with patch("tools.task_tools.jira") as mock_jira:
+            mock_jira.create_issue.return_value = {"key": "KO-201"}
+            result = create_issue.invoke({
+                "project_key": "KO",
+                "summary": "设计登录页面",
+                "issue_type": "Task",
+                "epic_link_key": "KO-200",
+            })
+            assert "成功" in result
+            assert "KO-201" in result
+            assert "KO-200" in result  # 应显示所属Epic
+
+    def test_create_subtask_under_task_in_epic(self):
+        """正确的层级：Epic → Task → Sub-task"""
+        with patch("tools.task_tools.jira") as mock_jira:
+            mock_jira.create_issue.return_value = {"key": "KO-202"}
+            result = create_issue.invoke({
+                "project_key": "KO",
+                "summary": "实现登录表单UI",
+                "issue_type": "Sub-task",
+                "parent_key": "KO-201",
+            })
+            assert "成功" in result
+            assert "KO-202" in result
+            assert "KO-201" in result
 
     def test_api_error(self):
         with patch("tools.task_tools.jira") as mock_jira:
