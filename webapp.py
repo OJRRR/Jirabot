@@ -1,5 +1,6 @@
 """PM小帮手 Web 界面 — 支持文件上传 & SSE 流式输出"""
 import sys, os, json, uuid, re, mimetypes, base64
+from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import (Flask, render_template, request, jsonify, session,
@@ -138,23 +139,22 @@ async def _sse_iter_events(stream_iter):
 # ── 流式响应超时（秒）──
 _STREAM_TIMEOUT = int(os.getenv("WEB_STREAM_TIMEOUT", "120"))
 
+# ── 全局线程池（复用线程，避免每个请求创建新线程+event loop）──
+_stream_executor = ThreadPoolExecutor(
+    max_workers=int(os.getenv("WEB_STREAM_WORKERS", "4")),
+    thread_name_prefix="stream",
+)
+
 
 def _sync_iter(async_gen):
-    """在独立线程的事件循环中运行异步迭代器，通过队列流式返回。
+    """在全局线程池中运行异步迭代器，通过队列流式返回。
 
-    为什么用独立线程而不是直接在当前线程创建 loop：
-    - AsyncSqliteSaver / aiosqlite 在 __init__ 时记录事件循环引用
-    - Flask/Waitress 每个请求可能在不同线程
-    - 如果 checkpointer 的 loop 与迭代 loop 不同，aiosqlite 的 run_in_executor
-      返回的 Future 会绑定到错误的 loop，导致 hang
-    - 独立线程 + 独立 loop 确保 aiosqlite 操作在正确的 loop 上执行
+    使用全局 ThreadPoolExecutor 复用线程，避免每个请求创建新线程+event loop 的开销。
     """
-    import asyncio
-    import threading
     from queue import Queue
 
     queue: "Queue" = Queue()
-    _error: list = [None]  # 跨线程传递异常
+    _error: list = [None]
 
     async def _collect():
         try:
@@ -173,8 +173,7 @@ def _sync_iter(async_gen):
         finally:
             loop.close()
 
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
+    future = _stream_executor.submit(_run)
 
     while True:
         kind, payload = queue.get()
