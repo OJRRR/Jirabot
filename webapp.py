@@ -434,6 +434,15 @@ def health():
 
 
 if __name__ == "__main__":
+    if agent is None:
+        print("\n❌ Agent 未初始化（LLM/Jira 不可达）")
+        print("   请检查 .env 配置中的以下变量：")
+        print("   - JIRA_SERVER / JIRA_USER / JIRA_TOKEN")
+        print("   - MODEL_API_BASE / MODEL_API_KEY / MODEL_NAME")
+        print("   修改后重新运行 python webapp.py\n")
+        import sys
+        sys.exit(1)
+
     port = int(os.getenv("WEB_PORT", "5000"))
     host = os.getenv("WEB_HOST", "127.0.0.1")
     # 生产模式默认走 waitress（多线程、稳定），设置 WEB_DEV=1 才启 Flask 自带服务器（仅开发用）
