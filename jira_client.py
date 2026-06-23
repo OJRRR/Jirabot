@@ -39,9 +39,14 @@ class JiraClient:
             cloud=False
         )
         # 测试连接
-        self.client.jql("assignee = currentUser()")
-        self._offline = False
-        _logger.info("Jira 连接成功 (%s)", Config.JIRA_SERVER)
+        try:
+            self.client.jql("assignee = currentUser()")
+            self._offline = False
+            _logger.info("Jira 连接成功 (%s)", Config.JIRA_SERVER)
+        except Exception as e:
+            self._offline = True
+            _logger.warning("Jira 连接测试失败: %s", e)
+            raise  # 重新抛出，由 __new__ 统一处理离线模式
 
     @property
     def is_offline(self) -> bool:
